@@ -1,0 +1,9 @@
+dash
+dash-bootstrap-components
+fastf1
+plotly
+pandas
+numpy
+gunicorn
+requests-cache
+tenacity
