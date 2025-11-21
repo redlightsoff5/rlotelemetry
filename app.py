@@ -44,17 +44,63 @@ COL_RED   = "#e11d2e"
 COL_TEXT  = "#ffffff"
 
 TEAM_COLORS = {
-    'Red Bull': '#4781D7', 'Oracle Red Bull Racing': '#4781D7',
-    'RB': '#6C98FF', 'Racing Bulls': '#6C98FF',
-    'Ferrari': '#ED1131', 'Scuderia Ferrari': '#ED1131',
-    'Mercedes': '#00D7B6', 'Mercedes-AMG Petronas': '#00D7B6',
-    'McLaren': '#F47600', 'McLaren F1 Team': '#F47600',
-    'Aston Martin': '#229971', 'Aston Martin Aramco': '#229971',
-    'Alpine': '#00A1E8', 'BWT Alpine F1 Team': '#00A1E8',
-    'Williams': '#1868DB', 'Williams Racing': '#1868DB',
-    'Stake': '#01C00E', 'Sauber': '#01C00E', 'Kick Sauber': '#01C00E', 'Audi': '#01C00E',
-    'Haas F1 Team': '#9C9FA2', 'Haas': '#9C9FA2'
+    'Red Bull':    '#4781D7',
+    'RB':          '#6C98FF',
+    'Ferrari':     '#ED1131',
+    'Mercedes':    '#00D7B6',
+    'McLaren':     '#F47600',
+    'Aston Martin':'#229971',
+    'Alpine':      '#00A1E8',
+    'Williams':    '#1868DB',
+    'Stake':       '#01C00E',   # Sauber/Kick/Audi bucket
+    'Haas':        '#9C9FA2'
 }
+
+# Map many possible FastF1 team strings to a canonical key in TEAM_COLORS
+TEAM_ALIASES = {
+    'red bull': 'Red Bull',
+    'oracle red bull': 'Red Bull',
+    'red bull racing': 'Red Bull',
+
+    'rb f1': 'RB',
+    'racing bulls': 'RB',
+    'visa cash app rb': 'RB',
+    'rb': 'RB',   # keep last as a catch-all
+
+    'ferrari': 'Ferrari',
+    'scuderia ferrari': 'Ferrari',
+
+    'mercedes': 'Mercedes',
+    'mercedes-amg': 'Mercedes',
+
+    'mclaren': 'McLaren',
+
+    'aston martin': 'Aston Martin',
+
+    'alpine': 'Alpine',
+    'bwt alpine': 'Alpine',
+
+    'williams': 'Williams',
+    'williams racing': 'Williams',
+
+    'sauber': 'Stake',
+    'kick sauber': 'Stake',
+    'stake': 'Stake',
+    'audi': 'Stake',   # 2026 branding bucketed here for now
+
+    'haas': 'Haas',
+    'haas f1': 'Haas'
+}
+
+def canonical_team(name: str) -> str:
+    if not isinstance(name, str):
+        return ''
+    s = name.strip().lower()
+    for key, canon in TEAM_ALIASES.items():
+        if key in s:
+            return canon
+    return name  # fallback to raw string (may still match a TEAM_COLORS key)
+
 
 COMMON_LAYOUT = dict(
     paper_bgcolor=COL_PANEL,
@@ -152,9 +198,15 @@ def load_session_laps(event_name:str, sess_code:str):
 # ---------- Builders ----------
 def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].dropna()
-    if laps.empty: return {}
-    team = laps.groupby('Driver')['Team'].agg(lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1])
-    return {drv: TEAM_COLORS.get(team_name, '#cccccc') for drv, team_name in team.items()}
+    if laps.empty:
+        return {}
+    # pick the most frequent team per driver, then normalize it
+    team = laps.groupby('Driver')['Team'].agg(
+        lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
+    ).apply(canonical_team)
+
+    # look up color from canonical name; default light grey if truly unknown
+    return {drv: TEAM_COLORS.get(t, '#cccccc') for drv, t in team.items()}
 
 def gap_to_leader_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
