@@ -44,16 +44,16 @@ COL_RED   = "#e11d2e"
 COL_TEXT  = "#ffffff"
 
 TEAM_COLORS = {
-    'Red Bull': '#0018F5', 'Oracle Red Bull Racing': '#0018F5',
-    'RB': '#2b4562', 'Racing Bulls': '#2b4562',
-    'Ferrari': '#dc0000', 'Scuderia Ferrari': '#dc0000',
-    'Mercedes': '#00D2BE', 'Mercedes-AMG Petronas': '#00D2BE',
-    'McLaren': '#FF8700', 'McLaren F1 Team': '#FF8700',
-    'Aston Martin': '#006F62', 'Aston Martin Aramco': '#006F62',
-    'Alpine': '#0090FF', 'BWT Alpine F1 Team': '#0090FF',
-    'Williams': '#005AFF', 'Williams Racing': '#005AFF',
-    'Stake': '#00E701', 'Sauber': '#00E701', 'Kick Sauber': '#00E701', 'Audi': '#00E701',
-    'Haas F1 Team': '#B6B6B6', 'Haas': '#B6B6B6'
+    'Red Bull': '#4781D7', 'Oracle Red Bull Racing': '#4781D7',
+    'RB': '#6C98FF', 'Racing Bulls': '#6C98FF',
+    'Ferrari': '#ED1131', 'Scuderia Ferrari': '#ED1131',
+    'Mercedes': '#00D7B6', 'Mercedes-AMG Petronas': '#00D7B6',
+    'McLaren': '#F47600', 'McLaren F1 Team': '#F47600',
+    'Aston Martin': '#229971', 'Aston Martin Aramco': '#229971',
+    'Alpine': '#00A1E8', 'BWT Alpine F1 Team': '#00A1E8',
+    'Williams': '#1868DB', 'Williams Racing': '#1868DB',
+    'Stake': '#01C00E', 'Sauber': '#01C00E', 'Kick Sauber': '#01C00E', 'Audi': '#01C00E',
+    'Haas F1 Team': '#9C9FA2', 'Haas': '#9C9FA2'
 }
 
 COMMON_LAYOUT = dict(
@@ -130,7 +130,7 @@ SESSION_OPTIONS = [
     {"label": "FP3",               "value": "FP3"},
     {"label": "Sprint Qualifying", "value": "SQ"},  # 2024/2025 naming
     {"label": "Qualifying",        "value": "Q"},
-    {"label": "Sprint",            "value": "S"},   # Sprint race
+    {"label": "Sprint",            "value": "SR"},   # Sprint race
     {"label": "Race",              "value": "R"},
 ]
 
