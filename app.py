@@ -1,4 +1,4 @@
-import os, warnings, logging, traceback, glob, time
+import os, warnings, logging, traceback, glob
 warnings.filterwarnings("ignore")
 logging.getLogger("fastf1").setLevel(logging.WARNING)
 
@@ -11,8 +11,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, no_update, ALL
 import dash_bootstrap_components as dbc
-from flask import request
-
 
 # ================= Setup & cache =================
 APP_DIR = os.path.dirname(__file__)
@@ -20,43 +18,24 @@ CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(APP_DIR, "cache"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 ff1.Cache.enable_cache(CACHE_DIR)
 
+# Years supported in the UI (keep this list tight on purpose)
+YEARS_ALLOWED = [2025, 2026]
 
-THIS_YEAR = int(pd.Timestamp.utcnow().year)
-MIN_YEAR = int(os.environ.get('MIN_YEAR', 2018))
-TODAY_UTC = pd.Timestamp.utcnow().tz_localize(None)
+def _utc_today_token() -> str:
+    # used to refresh cached schedules daily without redeploys
+    return pd.Timestamp.utcnow().strftime("%Y-%m-%d")
 
-def _latest_year_with_past_event(min_year:int, max_year:int) -> int:
-    """Pick the latest year that has at least one event in the past (so telemetry exists)."""
-    for y in range(max_year, min_year - 1, -1):
+def default_year_value() -> int:
+    """Pick the newest year that has at least one completed event; fallback to first allowed year."""
+    today = pd.Timestamp.utcnow().tz_localize(None)
+    for y in sorted(YEARS_ALLOWED, reverse=True):
         try:
-            sdf = ff1.get_event_schedule(int(y), include_testing=False).copy()
-            if sdf is None or sdf.empty:
-                continue
-            sdf['EventDate'] = pd.to_datetime(sdf['EventDate'])
-            if not sdf[sdf['EventDate'] <= TODAY_UTC].empty:
-                return int(y)
+            df = get_schedule_df(y, _utc_today_token())
+            if not df.empty and (df['EventDate'] <= today).any():
+                return y
         except Exception:
             continue
-    return int(max_year-1 if max_year>min_year else max_year)
-
-DEFAULT_YEAR = int(os.environ.get('DEFAULT_YEAR', _latest_year_with_past_event(MIN_YEAR, THIS_YEAR)))
-YEARS = list(range(MIN_YEAR, THIS_YEAR + 1))
-# ---- one-time schedule cache refresh (set REFRESH_SCHEDULE=1 in env, redeploy once) ----
-# This deletes FastF1 schedule cache files to force a re-fetch (useful if FastF1 updates naming).
-if os.environ.get("REFRESH_SCHEDULE") == "1":
-    try:
-        for ydir in glob.glob(os.path.join(CACHE_DIR, "*")):
-            if not os.path.isdir(ydir):
-                continue
-            for pat in ("*EventSchedule*", "*schedule*"):
-                for f in glob.glob(os.path.join(ydir, pat)):
-                    try:
-                        os.remove(f)
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-# ----------------------------------------------------------------------------------------
+    return YEARS_ALLOWED[0]
 
 # Brand
 SITE_TITLE = "Telemetry by RedLightsOff"
@@ -130,10 +109,7 @@ COMMON_LAYOUT = dict(
     paper_bgcolor=COL_PANEL,
     plot_bgcolor=COL_PANEL,
     font=dict(color=COL_TEXT),
-    margin=dict(l=12, r=12, t=48, b=12),
-    hovermode='x unified',
-    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-    uirevision='rlo'
+    margin=dict(l=12, r=12, t=48, b=12)
 )
 
 def brand(fig):
@@ -175,59 +151,22 @@ def is_race(ses):
     n = (getattr(ses, 'name', '') or '').upper()
     return t == 'R' or 'RACE' in n
 
-def filter_laps_df(laps: pd.DataFrame, filters=None) -> pd.DataFrame:
-    """Optional filtering to make pace-style charts clearer."""
-    if laps is None or laps.empty:
-        return laps
-    filters = set(filters or [])
-    out = laps.copy()
-
-    if 'accurate' in filters and 'IsAccurate' in out.columns:
-        out = out[out['IsAccurate'] == True]
-
-    if 'no_pit' in filters:
-        # FastF1 laps usually expose PitInTime/PitOutTime for race sessions
-        if 'PitInTime' in out.columns:
-            out = out[out['PitInTime'].isna()]
-        if 'PitOutTime' in out.columns:
-            out = out[out['PitOutTime'].isna()]
-
-    return out
-
 # ---------- Live Schedule & Options ----------
-
-# ---------- Live Schedule & Options ----------
-# FastF1 schedule is cached on disk, but we also keep an in-process TTL to avoid stale data
-_SCHEDULE_MEM = {}  # year -> {"ts": float, "df": DataFrame}
-SCHEDULE_TTL_S = int(os.environ.get("SCHEDULE_TTL_S", 6 * 3600))
-
-def get_schedule_df(year:int) -> pd.DataFrame:
-    now = time.time()
-    hit = _SCHEDULE_MEM.get(int(year))
-    if hit and (now - hit["ts"] < SCHEDULE_TTL_S):
-        return hit["df"]
-
-    try:
-        df = ff1.get_event_schedule(int(year), include_testing=False).copy()
-        if df is None or df.empty:
-            df = pd.DataFrame(columns=['RoundNumber','EventName','EventDate'])
-        else:
-            df['EventDate'] = pd.to_datetime(df['EventDate'])
-            df = df[['RoundNumber','EventName','EventDate']].sort_values('RoundNumber').reset_index(drop=True)
-    except Exception:
-        df = pd.DataFrame(columns=['RoundNumber','EventName','EventDate'])
-
-    _SCHEDULE_MEM[int(year)] = {"ts": now, "df": df}
+@lru_cache(maxsize=8)
+def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
+    df = ff1.get_event_schedule(year, include_testing=False).copy()
+    df['EventDate'] = pd.to_datetime(df['EventDate'])
+    df = df[['RoundNumber','EventName','EventDate']].sort_values('RoundNumber').reset_index(drop=True)
     return df
 
 def build_gp_options(year:int):
-    df = get_schedule_df(year)
+    df = get_schedule_df(year, _utc_today_token())
     return [{'label': f"R{int(r.RoundNumber)} — {r.EventName} ({r.EventDate.date()})",
              'value': r.EventName} for _, r in df.iterrows()]
 
 def default_event_value(year:int):
-    df = get_schedule_df(year)
-    # pick the latest event up to "now"; if none, return None (prevents selecting a future GP by default)
+    df = get_schedule_df(year, _utc_today_token())
+    # pick the latest completed event; if none completed yet, return None
     today = pd.Timestamp.utcnow().tz_localize(None)
     past = df[df['EventDate'] <= today]
     if not past.empty:
@@ -245,7 +184,8 @@ SESSION_OPTIONS = [
 ]
 
 # ---------- Loaders ----------
-@lru_cache(maxsize=96)
+@lru_cache(maxsize=64)
+@lru_cache(maxsize=32)
 def load_session_laps(year:int, event_name:str, sess_code:str):
     """Load a session by official EventName (e.g., 'United States Grand Prix') and session code."""
     try:
@@ -274,7 +214,6 @@ def driver_team_color_map(ses):
 
 def gap_to_leader_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
-    laps = filter_laps_df(laps, filters)
     if laps.empty: return pd.DataFrame()
     if is_race(ses):
         laps['LapSeconds'] = laps['LapTime'].dt.total_seconds()
@@ -309,18 +248,15 @@ def tyre_stints_df(ses):
     agg['Laps'] = agg['LapEnd'] - agg['LapStart'] + 1
     return agg.reset_index().sort_values(['Driver','Stint'])
 
-def pace_df(ses, filters=None):
+def pace_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
-    laps = filter_laps_df(laps, filters)
     if laps.empty: return pd.DataFrame()
     laps['LapSeconds'] = laps['LapTime'].dt.total_seconds().astype(float)
     laps['LapStr'] = laps['LapSeconds'].apply(s_to_mssmmm)
     return laps[['Driver','LapNumber','LapSeconds','LapStr']]
 
-def sector_records_df(ses, filters=None):
-    laps = ses.laps.copy()
-    laps = filter_laps_df(laps.dropna(subset=['LapTime']), filters)
-    out=[]
+def sector_records_df(ses):
+    laps = ses.laps.copy(); out=[]
     for i,c in enumerate(['Sector1Time','Sector2Time','Sector3Time'], start=1):
         if c not in laps.columns: continue
         idx = laps[c].idxmin()
@@ -391,59 +327,38 @@ app.index_string = f"""
 </html>
 """
 
-
 def header_controls():
     return dbc.Row([
         dbc.Col([
             dbc.Label("Year"),
             dcc.Dropdown(
                 id='year-dd',
-                options=[{'label': str(y), 'value': int(y)} for y in YEARS],
-                value=DEFAULT_YEAR,
+                options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
+                value=default_year_value(),
                 clearable=False
-            )
-        ], md=2),
-
+            ),
+            html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
+        ], md=3),
         dbc.Col([
             dbc.Label("Grand Prix"),
-            dcc.Dropdown(id='event-dd',
-                         options=build_gp_options(DEFAULT_YEAR),
-                         value=default_event_value(DEFAULT_YEAR),
-                         clearable=False)
-        ], md=6),
-
-        dbc.Col([
-            dbc.Label("Session"),
-            dcc.Dropdown(id='session-dd',
-                         options=SESSION_OPTIONS,
-                         value='R',
-                         clearable=False)
-        ], md=2),
-
-        dbc.Col([
-            dbc.Label("Lap filter"),
             dcc.Dropdown(
-                id='lap-filter',
-                options=[
-                    {'label': 'Accurate laps only', 'value': 'accurate'},
-                    {'label': 'Exclude pit in/out laps', 'value': 'no_pit'},
-                ],
-                value=['accurate', 'no_pit'],
-                multi=True,
+                id='event-dd',
+                options=build_gp_options(default_year_value()),
+                value=default_event_value(default_year_value()),
                 clearable=False
             )
-        ], md=2),
-    ], className="mt-3 mb-2")
+        ], md=6),
+        dbc.Col([
+            dbc.Label("Session"),
+            dcc.Dropdown(
+                id='session-dd',
+                options=SESSION_OPTIONS,
+                value='R',
+                clearable=False
+            )
+        ], md=3),
+    ], className="g-2")
 
-def graph_box(graph_id, title, chart_key):
-    dd_id = {'role':'drv','chart':chart_key}
-    return html.Div(className="box", children=[
-        dbc.Row([
-            dbc.Col(html.H6(title, className="mb-1"), md="auto"),
-            dbc.Col(dcc.Dropdown(id=dd_id, options=[], value=[], multi=True, placeholder="Drivers…"), md=True),
-        ], align="center", className="mb-2"),
-        dcc.Graph(id=graph_id, config={"displaylogo": False, "responsive": True}),
-    ])
 
 def tab_evolution():
     return html.Div([
@@ -493,20 +408,6 @@ def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
             "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
 
-# ===== Update GP options when year changes =====
-@app.callback(
-    Output('event-dd', 'options'),
-    Output('event-dd', 'value'),
-    Input('year-dd', 'value')
-)
-def _update_events_for_year(year):
-    if not year:
-        return no_update, no_update
-    opts = build_gp_options(int(year))
-    val = default_event_value(int(year))
-    return opts, val
-
-
 # ===== Load session once =====
 @app.callback(
     Output('store','data'),
@@ -528,15 +429,6 @@ def load_session_meta(year, event_name, sess_code):
     except Exception:
         traceback.print_exc()
         return no_update, [], {}
-    try:
-        ses = load_session_laps(int(year), str(event_name), str(sess_code))
-        laps = filter_laps_df(ses.laps.dropna(subset=['LapTime']), filters)
-        drivers = sorted(laps['Driver'].dropna().unique().tolist())
-        colors = driver_team_color_map(ses)
-        return {'year': int(year), 'event': str(event_name), 'sess': str(sess_code)}, drivers, colors
-    except Exception:
-        traceback.print_exc()
-        return no_update, [], {}
 
 # ===== Populate ONLY mounted dropdowns (incl. when switching tabs) =====
 @app.callback(
@@ -551,6 +443,34 @@ def fill_dropdowns(drivers, _children, ids):
     val = drivers or []
     n = len(ids)
     return [opts]*n, [val]*n
+
+
+# ===== Year-driven GP list + guard against future-only seasons =====
+@app.callback(
+    Output('event-dd','options'),
+    Output('event-dd','value'),
+    Output('year-warning','children'),
+    Input('year-dd','value'),
+    State('event-dd','value')
+)
+def _year_changed(year, current_event):
+    if year is None:
+        return [], None, ""
+    year = int(year)
+    try:
+        opts = build_gp_options(year)
+        default_ev = default_event_value(year)
+        # If user had an event selected and it's still valid, keep it; otherwise use default (latest completed) or None
+        valid = {o['value'] for o in (opts or [])}
+        value = current_event if current_event in valid else default_ev
+        warn = ""
+        if default_ev is None:
+            warn = f"No completed events yet for {year}. Select 2025 to view data."
+            value = None
+        return opts, value, warn
+    except Exception:
+        # Fail closed: don't crash the whole app
+        return [], None, f"Schedule unavailable for {year}."
 
 # ---------- helper to color by team ----------
 def set_trace_color(fig, name_to_color):
@@ -567,7 +487,7 @@ def set_trace_color(fig, name_to_color):
 )
 def chart_gap(data, selected, color_map):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = gap_to_leader_df(ses)
     if selected: df = df[df['Driver'].isin(selected)]
     if df.empty: return fig_empty("Gap — no data")
@@ -589,7 +509,7 @@ def chart_gap(data, selected, color_map):
 )
 def chart_lapchart(data, selected, color_map):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     laps = ses.laps[['Driver','LapNumber','Position']].dropna()
     if selected: laps = laps[laps['Driver'].isin(selected)]
     if laps.empty: return fig_empty("Lapchart — no data")
@@ -600,13 +520,12 @@ def chart_lapchart(data, selected, color_map):
 @app.callback(
     Output('evo-pace','figure'),
     Input('store','data'), Input({'role':'drv','chart':'ep'}, 'value'),
-    Input('lap-filter','value'),
     State('team-color-store','data')
 )
-def chart_evo(data, selected, filters, color_map):
+def chart_evo(data, selected, color_map):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
-    pdf = pace_df(ses, filters)
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
+    pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
     if pdf.empty: return fig_empty("Evolution — no lap data")
     pdf = pdf.sort_values(['Driver','LapNumber'])
@@ -625,7 +544,7 @@ def chart_evo(data, selected, filters, color_map):
 )
 def chart_pos(data, selected):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = positions_gained_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
     if df.empty: return fig_empty("Positions Gained — (Race only / no data)")
@@ -640,7 +559,7 @@ def chart_pos(data, selected):
 )
 def chart_tyres(data, selected):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     st = tyre_stints_df(ses)
     if selected: st = st[st['Driver'].isin(selected)]
     if st.empty: return fig_empty("Tyre Strategy — no data")
@@ -663,13 +582,12 @@ def chart_tyres(data, selected):
 @app.callback(
     Output('pace','figure'),
     Input('store','data'), Input({'role':'drv','chart':'pace'}, 'value'),
-    Input('lap-filter','value'),
     State('team-color-store','data')
 )
-def chart_pace(data, selected, filters, color_map):
+def chart_pace(data, selected, color_map):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
-    pdf = pace_df(ses, filters)
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
+    pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
     if pdf.empty: return fig_empty("Pace — no lap data")
     f = go.Figure()
@@ -685,13 +603,12 @@ def chart_pace(data, selected, filters, color_map):
 @app.callback(
     Output('best-laps','figure'),
     Input('store','data'), Input({'role':'drv','chart':'best'}, 'value'),
-    Input('lap-filter','value'),
     State('team-color-store','data')
 )
-def chart_best(data, selected, filters, color_map):
+def chart_best(data, selected, color_map):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
-    laps = filter_laps_df(ses.laps.dropna(subset=['LapTime']), filters)
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
+    laps = ses.laps.dropna(subset=['LapTime'])
     if selected: laps = laps[laps['Driver'].isin(selected)]
     if laps.empty: return fig_empty("Best Laps — no data")
     best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
@@ -704,13 +621,12 @@ def chart_best(data, selected, filters, color_map):
 
 @app.callback(
     Output('sectors','figure'),
-    Input('store','data'), Input({'role':'drv','chart':'sec'}, 'value'),
-    Input('lap-filter','value'),
+    Input('store','data'), Input({'role':'drv','chart':'sec'}, 'value')
 )
-def chart_sectors(data, selected, filters):
+def chart_sectors(data, selected):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
-    df = sector_records_df(ses, filters)
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
+    df = sector_records_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
     if df.empty: return fig_empty("Sector Records — no data")
     f = go.Figure(data=[go.Table(
@@ -729,7 +645,7 @@ def chart_sectors(data, selected, filters):
 )
 def chart_speeds(data, selected):
     if not data: return fig_empty("(no data)")
-    ses = load_session_laps(int(data['year']), data['event'], data['sess'])
+    ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     spd = speed_records_df(ses)
     if selected and not spd.empty: spd = spd[spd['Driver'].isin(selected)]
     if spd.empty: return fig_empty("Speed Records — no data")
@@ -745,26 +661,6 @@ def chart_speeds(data, selected):
 
 # ================= Run =================
 server = app.server
-
-@server.route('/health')
-def health():
-    return 'ok', 200
-
-@server.route('/warmup')
-def warmup():
-    """Warm FastF1 cache for the latest past event (useful after cold starts)."""
-    try:
-        year = int(request.args.get('year', DEFAULT_YEAR))
-        event = default_event_value(year)
-        # Warm the most-used sessions
-        for sess in ('R','Q','SR','SQ','FP2'):
-            try:
-                load_session_laps(year, str(event), str(sess))
-            except Exception:
-                pass
-        return f'warmed {year} {event}', 200
-    except Exception as e:
-        return f'error: {e}', 500
 
 if __name__ == "__main__":
     app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
