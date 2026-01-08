@@ -22,8 +22,24 @@ ff1.Cache.enable_cache(CACHE_DIR)
 
 
 THIS_YEAR = int(pd.Timestamp.utcnow().year)
-DEFAULT_YEAR = int(os.environ.get('DEFAULT_YEAR', THIS_YEAR))
 MIN_YEAR = int(os.environ.get('MIN_YEAR', 2018))
+TODAY_UTC = pd.Timestamp.utcnow().tz_localize(None)
+
+def _latest_year_with_past_event(min_year:int, max_year:int) -> int:
+    """Pick the latest year that has at least one event in the past (so telemetry exists)."""
+    for y in range(max_year, min_year - 1, -1):
+        try:
+            sdf = ff1.get_event_schedule(int(y), include_testing=False).copy()
+            if sdf is None or sdf.empty:
+                continue
+            sdf['EventDate'] = pd.to_datetime(sdf['EventDate'])
+            if not sdf[sdf['EventDate'] <= TODAY_UTC].empty:
+                return int(y)
+        except Exception:
+            continue
+    return int(max_year-1 if max_year>min_year else max_year)
+
+DEFAULT_YEAR = int(os.environ.get('DEFAULT_YEAR', _latest_year_with_past_event(MIN_YEAR, THIS_YEAR)))
 YEARS = list(range(MIN_YEAR, THIS_YEAR + 1))
 # ---- one-time schedule cache refresh (set REFRESH_SCHEDULE=1 in env, redeploy once) ----
 # This deletes FastF1 schedule cache files to force a re-fetch (useful if FastF1 updates naming).
@@ -191,9 +207,15 @@ def get_schedule_df(year:int) -> pd.DataFrame:
     if hit and (now - hit["ts"] < SCHEDULE_TTL_S):
         return hit["df"]
 
-    df = ff1.get_event_schedule(int(year), include_testing=False).copy()
-    df['EventDate'] = pd.to_datetime(df['EventDate'])
-    df = df[['RoundNumber','EventName','EventDate']].sort_values('RoundNumber').reset_index(drop=True)
+    try:
+        df = ff1.get_event_schedule(int(year), include_testing=False).copy()
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=['RoundNumber','EventName','EventDate'])
+        else:
+            df['EventDate'] = pd.to_datetime(df['EventDate'])
+            df = df[['RoundNumber','EventName','EventDate']].sort_values('RoundNumber').reset_index(drop=True)
+    except Exception:
+        df = pd.DataFrame(columns=['RoundNumber','EventName','EventDate'])
 
     _SCHEDULE_MEM[int(year)] = {"ts": now, "df": df}
     return df
@@ -205,12 +227,12 @@ def build_gp_options(year:int):
 
 def default_event_value(year:int):
     df = get_schedule_df(year)
-    # pick the latest event up to "now"; if none, first event
+    # pick the latest event up to "now"; if none, return None (prevents selecting a future GP by default)
     today = pd.Timestamp.utcnow().tz_localize(None)
     past = df[df['EventDate'] <= today]
     if not past.empty:
         return past.iloc[-1]['EventName']
-    return df.iloc[0]['EventName'] if not df.empty else None
+    return None
 
 SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
@@ -495,7 +517,16 @@ def _update_events_for_year(year):
     Input('session-dd','value')
 )
 def load_session_meta(year, event_name, sess_code):
-    if not event_name or not sess_code:
+    if not year or not event_name or not sess_code:
+        return no_update, [], {}
+    try:
+        ses = load_session_laps(int(year), str(event_name), str(sess_code))
+        laps = ses.laps.dropna(subset=['LapTime'])
+        drivers = sorted(laps['Driver'].dropna().unique().tolist())
+        colors = driver_team_color_map(ses)
+        return {'year': int(year), 'event': str(event_name), 'sess': str(sess_code)}, drivers, colors
+    except Exception:
+        traceback.print_exc()
         return no_update, [], {}
     try:
         ses = load_session_laps(int(year), str(event_name), str(sess_code))
