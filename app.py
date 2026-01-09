@@ -360,6 +360,33 @@ def header_controls():
     ], className="g-2")
 
 
+
+def graph_box(graph_id: str, title: str, chart_key: str):
+    """Reusable card with a driver filter dropdown + a graph."""
+    return html.Div(className="box", children=[
+        dbc.Row([
+            dbc.Col(html.H5(title, className="m-0"), md=6, style={"display":"flex","alignItems":"center"}),
+            dbc.Col([
+                dcc.Dropdown(
+                    id={"role": "drv", "chart": chart_key},
+                    multi=True,
+                    placeholder="Filter drivers (optional)",
+                    options=[],
+                    value=[]
+                )
+            ], md=6),
+        ], className="g-2 align-items-center"),
+        dcc.Loading(
+            dcc.Graph(
+                id=graph_id,
+                figure=fig_empty(title),
+                config={"displayModeBar": False, "scrollZoom": True},
+                style={"height": "420px"}
+            ),
+            type="default"
+        )
+    ])
+
 def tab_evolution():
     return html.Div([
         dbc.Row([
