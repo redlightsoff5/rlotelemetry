@@ -41,10 +41,10 @@ def default_year_value() -> int:
 SITE_TITLE = "Telemetry by RedLightsOff"
 WATERMARK  = "@redlightsoff5"
 
-COL_BG    = "#0b0b0d"
-COL_PANEL = "#141418"
+COL_BG    = "#e6e6e6"
+COL_PANEL = "#ffffff"
 COL_RED   = "#e11d2e"
-COL_TEXT  = "#ffffff"
+COL_TEXT  = "#111111"
 
 TEAM_COLORS = {
     'Red Bull':    '#4781D7',
@@ -122,7 +122,7 @@ def brand(fig):
         text=WATERMARK,
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
-        font=dict(size=42, color="rgba(255,255,255,0.16)", family="Montserrat, Arial"),
+        font=dict(size=42, color="rgba(0,0,0,0.08)", family="Montserrat, Arial"),
         xanchor="center", yanchor="middle",
         opacity=0.25
     )
@@ -282,7 +282,7 @@ def speed_records_df(ses):
     return pd.DataFrame(rows)
 
 # ================= Dash =================
-external_stylesheets=[dbc.themes.CYBORG]
+external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 app.title = SITE_TITLE  # browser tab title
 
@@ -337,7 +337,6 @@ def header_controls():
                 value=default_year_value(),
                 clearable=False
             ),
-            html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
         ], md=3),
         dbc.Col([
             dbc.Label("Grand Prix"),
@@ -416,21 +415,29 @@ def tab_records():
 def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
-app.layout = dbc.Container([
-    header_controls(),
-    dcc.Tabs(id="tabs", value="evo",
-             children=[dcc.Tab(label="Evolution", value="evo"),
-                       dcc.Tab(label="Tyres", value="tyres"),
-                       dcc.Tab(label="Pace", value="pace"),
-                       dcc.Tab(label="Records", value="records"),
-                       dcc.Tab(label="Speeds", value="speeds")]),
-    html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
-    dcc.Store(id='store'),
-    dcc.Store(id='drivers-store'),
-    dcc.Store(id='team-color-store')
-], fluid=True)
+app.layout = html.Div(className="app-container", children=[
+    dbc.NavbarSimple(
+        brand=html.Span([
+            html.Span("RLO", className="brand-main"),
+            html.Span("Telemetry", className="brand-accent"),
+        ], className="brand-wrap"),
+        color="light",
+        dark=False,
+        className="navbar-custom"
+    ),
+    dbc.Container([
+        dbc.Card(dbc.CardBody([
+            header_controls(),
+        ]), className="tabs-card mb-3"),
+        html.Div(id="tab-body", className="mb-3", children=tab_evolution()),
+        dcc.Store(id='store'),
+        dcc.Store(id='drivers-store'),
+        dcc.Store(id='team-color-store')
+    ], fluid=True, className="content-wrap")
+])
 
-@app.callback(Output("tab-body","children"), Input("tabs","value"))
+
+@app.callback(Output("tab-body","children"), Input("tabs","active_tab"))
 def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
             "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
