@@ -1,0 +1,85 @@
+/* Global */
+body {
+  background: #e6e6e6;
+  color: #111111;
+}
+
+/* Container */
+.app-container {
+  min-height: 100vh;
+}
+
+.content-wrap {
+  padding-top: 18px;
+  padding-bottom: 24px;
+}
+
+/* Navbar */
+.navbar-custom {
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.brand-wrap {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  font-size: 1.25rem;
+}
+.brand-main { color: #111111; margin-right: 8px; }
+.brand-accent { color: #e11d2e; }
+
+/* Cards */
+.controls-card,
+.tabs-card,
+.box {
+  background: #ffffff;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+}
+
+.controls-card .form-label {
+  font-weight: 700;
+  color: #111111;
+}
+
+/* Make dropdowns feel cleaner */
+.Select-control,
+.Select-menu-outer,
+.VirtualizedSelectOption {
+  border-radius: 12px !important;
+}
+
+.year-warning {
+  color: #e11d2e;
+  font-weight: 600;
+}
+
+/* Tabs */
+.tabs-custom .nav-link {
+  border: 0 !important;
+  border-radius: 12px !important;
+  margin-right: 8px;
+  color: #111111 !important;
+  font-weight: 700;
+}
+
+.tabs-custom .nav-link.active {
+  background: rgba(225,29,46,0.12) !important;
+  color: #e11d2e !important;
+}
+
+/* Graph box from graph_box() */
+.box {
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.box h5 {
+  color: #111111;
+  font-weight: 800;
+}
+
+/* Loading spinner */
+._dash-loading-callback {
+  color: #e11d2e !important;
+}
