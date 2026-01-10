@@ -288,7 +288,7 @@ def speed_records_df(ses):
     return pd.DataFrame(rows)
 
 # ================= Dash =================
-external_stylesheets=[dbc.themes.CYBORG]
+external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 app.title = SITE_TITLE  # browser tab title
 
@@ -423,18 +423,27 @@ def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
 app.layout = dbc.Container([
+
+    
     header_controls(),
-    dcc.Tabs(id="tabs", value="evo",
-             children=[dcc.Tab(label="Evolution", value="evo"),
-                       dcc.Tab(label="Tyres", value="tyres"),
-                       dcc.Tab(label="Pace", value="pace"),
-                       dcc.Tab(label="Records", value="records"),
-                       dcc.Tab(label="Speeds", value="speeds")]),
+    dcc.Tabs(
+        id="tabs",
+        value="evo",
+        parent_className="rlo-tabs-parent",
+        className="rlo-tabs",
+        children=[
+            dcc.Tab(label="Evolution", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Tyres", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
+        ],
+    ),
     html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
     dcc.Store(id='store'),
     dcc.Store(id='drivers-store'),
     dcc.Store(id='team-color-store')
-], fluid=True)
+], fluid=True, className='rlo-page')
 
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
