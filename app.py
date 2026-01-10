@@ -41,22 +41,23 @@ def default_year_value() -> int:
 SITE_TITLE = "Telemetry by RedLightsOff"
 WATERMARK  = "@redlightsoff5"
 
-COL_BG    = "#e6e6e6"
-COL_PANEL = "#ffffff"
+COL_BG    = "#0b0b0d"
+COL_PANEL = "#141418"
 COL_RED   = "#e11d2e"
-COL_TEXT  = "#111111"
+COL_TEXT  = "#ffffff"
 
 TEAM_COLORS = {
-    'Red Bull':    '#4781D7',
-    'RB':          '#6C98FF',
-    'Ferrari':     '#ED1131',
-    'Mercedes':    '#00D7B6',
-    'McLaren':     '#F47600',
-    'Aston Martin':'#229971',
-    'Alpine':      '#00A1E8',
-    'Williams':    '#1868DB',
-    'Stake':       '#01C00E',   # Sauber/Kick/Audi bucket
-    'Haas':        '#9C9FA2'
+    # Broadcast-style team colors (used on F1 graphics; same for both drivers of a team)
+    'Red Bull':      '#3671C6',
+    'McLaren':       '#FF8000',
+    'Ferrari':       '#E80020',
+    'Mercedes':      '#27F4D2',
+    'Aston Martin':  '#229971',
+    'Alpine':        '#0093CC',
+    'Williams':      '#64C4FF',
+    'Racing Bulls':  '#6692FF',
+    'Sauber':        '#52E252',
+    'Haas':          '#B6BABD'
 }
 
 # Map many possible FastF1 team strings to a canonical key in TEAM_COLORS
@@ -65,10 +66,12 @@ TEAM_ALIASES = {
     'oracle red bull': 'Red Bull',
     'red bull racing': 'Red Bull',
 
-    'rb f1': 'RB',
-    'racing bulls': 'RB',
-    'visa cash app rb': 'RB',
-    'rb': 'RB',   # keep last as a catch-all
+    # VCARB / RB / Racing Bulls naming
+    'rb f1': 'Racing Bulls',
+    'racing bulls': 'Racing Bulls',
+    'visa cash app rb': 'Racing Bulls',
+    'vcarb': 'Racing Bulls',
+    'rb': 'Racing Bulls',   # keep last as a catch-all
 
     'ferrari': 'Ferrari',
     'scuderia ferrari': 'Ferrari',
@@ -86,14 +89,17 @@ TEAM_ALIASES = {
     'williams': 'Williams',
     'williams racing': 'Williams',
 
-    'sauber': 'Stake',
-    'kick sauber': 'Stake',
-    'stake': 'Stake',
-    'audi': 'Stake',   # 2026 branding bucketed here for now
+    # Sauber / Kick / Stake / Audi (bucketed for 2025–2026)
+    'sauber': 'Sauber',
+    'kick sauber': 'Sauber',
+    'stake': 'Sauber',
+    'stake f1': 'Sauber',
+    'audi': 'Sauber',
 
     'haas': 'Haas',
     'haas f1': 'Haas'
 }
+
 
 def canonical_team(name: str) -> str:
     if not isinstance(name, str):
@@ -122,7 +128,7 @@ def brand(fig):
         text=WATERMARK,
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
-        font=dict(size=42, color="rgba(0,0,0,0.08)", family="Montserrat, Arial"),
+        font=dict(size=42, color="rgba(255,255,255,0.16)", family="Montserrat, Arial"),
         xanchor="center", yanchor="middle",
         opacity=0.25
     )
@@ -282,7 +288,7 @@ def speed_records_df(ses):
     return pd.DataFrame(rows)
 
 # ================= Dash =================
-external_stylesheets=[dbc.themes.FLATLY]
+external_stylesheets=[dbc.themes.CYBORG]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 app.title = SITE_TITLE  # browser tab title
 
@@ -337,6 +343,7 @@ def header_controls():
                 value=default_year_value(),
                 clearable=False
             ),
+            html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
         ], md=3),
         dbc.Col([
             dbc.Label("Grand Prix"),
@@ -415,29 +422,21 @@ def tab_records():
 def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
-app.layout = html.Div(className="app-container", children=[
-    dbc.NavbarSimple(
-        brand=html.Span([
-            html.Span("RLO", className="brand-main"),
-            html.Span("Telemetry", className="brand-accent"),
-        ], className="brand-wrap"),
-        color="light",
-        dark=False,
-        className="navbar-custom"
-    ),
-    dbc.Container([
-        dbc.Card(dbc.CardBody([
-            header_controls(),
-        ]), className="tabs-card mb-3"),
-        html.Div(id="tab-body", className="mb-3", children=tab_evolution()),
-        dcc.Store(id='store'),
-        dcc.Store(id='drivers-store'),
-        dcc.Store(id='team-color-store')
-    ], fluid=True, className="content-wrap")
-])
+app.layout = dbc.Container([
+    header_controls(),
+    dcc.Tabs(id="tabs", value="evo",
+             children=[dcc.Tab(label="Evolution", value="evo"),
+                       dcc.Tab(label="Tyres", value="tyres"),
+                       dcc.Tab(label="Pace", value="pace"),
+                       dcc.Tab(label="Records", value="records"),
+                       dcc.Tab(label="Speeds", value="speeds")]),
+    html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
+    dcc.Store(id='store'),
+    dcc.Store(id='drivers-store'),
+    dcc.Store(id='team-color-store')
+], fluid=True)
 
-
-@app.callback(Output("tab-body","children"), Input("tabs","active_tab"))
+@app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
             "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
