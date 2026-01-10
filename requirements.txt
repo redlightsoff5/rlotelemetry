@@ -1,10 +1,12 @@
 dash
 dash-bootstrap-components
 fastf1
-plotly
+dash_echarts
 pandas
 numpy
+plotly
 gunicorn
 requests-cache
 tenacity
-
+Flask-Caching
+Flask-Compress
