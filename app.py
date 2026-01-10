@@ -1,4 +1,4 @@
-import os, warnings, logging, traceback, glob
+import os, warnings, logging, traceback
 warnings.filterwarnings("ignore")
 logging.getLogger("fastf1").setLevel(logging.WARNING)
 
@@ -21,33 +21,22 @@ ff1.Cache.enable_cache(CACHE_DIR)
 # Years supported in the UI (keep this list tight on purpose)
 YEARS_ALLOWED = [2025, 2026]
 
-def _utc_today_token() -> str:
-    # used to refresh cached schedules daily without redeploys
-    return pd.Timestamp.utcnow().strftime("%Y-%m-%d")
+# Optional: donations button (set in Render env vars)
+BMC_URL = os.environ.get("BMC_URL", "").strip()
 
-def default_year_value() -> int:
-    """Pick the newest year that has at least one completed event; fallback to first allowed year."""
-    today = pd.Timestamp.utcnow().tz_localize(None)
-    for y in sorted(YEARS_ALLOWED, reverse=True):
-        try:
-            df = get_schedule_df(y, _utc_today_token())
-            if not df.empty and (df['EventDate'] <= today).any():
-                return y
-        except Exception:
-            continue
-    return YEARS_ALLOWED[0]
+SITE_TITLE = "RLO Telemetry"
+TAGLINE = "Race pace, tyres, and evolution — updated as soon as sessions are available."
+WATERMARK = "@redlightsoff5"
 
-# Brand
-SITE_TITLE = "Telemetry by RedLightsOff"
-WATERMARK  = "@redlightsoff5"
-
-COL_BG    = "#0b0b0d"
-COL_PANEL = "#141418"
-COL_RED   = "#e11d2e"
-COL_TEXT  = "#ffffff"
+# ---------- Colors (light + friendly) ----------
+COL_BG      = "#9f9797"    # page background (also set in CSS, keep consistent)
+COL_CARD    = "#ffffff"
+COL_TEXT    = "#111111"
+COL_MUTED   = "rgba(0,0,0,0.62)"
+COL_RED     = "#c0001a"
 
 TEAM_COLORS = {
-    # Broadcast-style team colors (used on F1 graphics; same for both drivers of a team)
+    # Broadcast-style team colors (same for both drivers of a team)
     'Red Bull':      '#3671C6',
     'McLaren':       '#FF8000',
     'Ferrari':       '#E80020',
@@ -67,11 +56,11 @@ TEAM_ALIASES = {
     'red bull racing': 'Red Bull',
 
     # VCARB / RB / Racing Bulls naming
-    'rb f1': 'Racing Bulls',
     'racing bulls': 'Racing Bulls',
     'visa cash app rb': 'Racing Bulls',
     'vcarb': 'Racing Bulls',
-    'rb': 'Racing Bulls',   # keep last as a catch-all
+    'rb f1': 'Racing Bulls',
+    'rb': 'Racing Bulls',
 
     'ferrari': 'Ferrari',
     'scuderia ferrari': 'Ferrari',
@@ -100,7 +89,6 @@ TEAM_ALIASES = {
     'haas f1': 'Haas'
 }
 
-
 def canonical_team(name: str) -> str:
     if not isinstance(name, str):
         return ''
@@ -108,38 +96,49 @@ def canonical_team(name: str) -> str:
     for key, canon in TEAM_ALIASES.items():
         if key in s:
             return canon
-    return name  # fallback to raw string (may still match a TEAM_COLORS key)
+    return name
 
-
+# ---------- Plotly defaults ----------
 COMMON_LAYOUT = dict(
-    paper_bgcolor=COL_PANEL,
-    plot_bgcolor=COL_PANEL,
-    font=dict(color=COL_TEXT),
-    margin=dict(l=12, r=12, t=48, b=12)
+    paper_bgcolor=COL_CARD,
+    plot_bgcolor=COL_CARD,
+    font=dict(color=COL_TEXT, family="Inter, system-ui, -apple-system, Segoe UI, Arial"),
+    margin=dict(l=12, r=12, t=48, b=12),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
 )
 
-def brand(fig):
+def brand(fig: go.Figure) -> go.Figure:
     """Apply common styling + centered watermark to a Plotly figure."""
     fig.update_layout(**COMMON_LAYOUT)
     fig.update_xaxes(showgrid=False, zeroline=False)
     fig.update_yaxes(showgrid=False, zeroline=False)
-    # watermark (center of plotting area)
+    fig.update_layout(uirevision="keep")  # keep zoom when filtering
     fig.add_annotation(
         text=WATERMARK,
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
-        font=dict(size=42, color="rgba(255,255,255,0.16)", family="Montserrat, Arial"),
+        font=dict(size=42, color="rgba(0,0,0,0.10)", family="Inter, system-ui, Arial"),
         xanchor="center", yanchor="middle",
-        opacity=0.25
+        opacity=0.22
     )
     return fig
 
-def fig_empty(title):
+from typing import Optional
+
+def fig_empty(title: str, subtitle: Optional[str] = None) -> go.Figure:
     f = go.Figure()
     f.update_layout(title=title, **COMMON_LAYOUT)
+    msg = subtitle or "Select a completed event + session to load data."
+    f.add_annotation(
+        text=msg,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5, showarrow=False,
+        font=dict(size=15, color="rgba(0,0,0,0.55)"),
+        xanchor="center", yanchor="middle"
+    )
     return brand(f)
 
-def polish(fig, grid=False):
+def polish(fig: go.Figure, grid: bool = False) -> go.Figure:
     fig.update_layout(**COMMON_LAYOUT)
     if not grid:
         fig.update_xaxes(showgrid=False, zeroline=False)
@@ -151,6 +150,22 @@ def s_to_mssmmm(x):
     x = float(x)
     m = int(x // 60); s = int(x % 60); ms = int(round((x - int(x))*1000))
     return f"{m}:{s:02d}.{ms:03d}"
+
+def _utc_today_token() -> str:
+    # used to refresh cached schedules daily without redeploys
+    return pd.Timestamp.utcnow().strftime("%Y-%m-%d")
+
+def default_year_value() -> int:
+    """Pick newest allowed year with at least one completed event; else 2025."""
+    today = pd.Timestamp.utcnow().tz_localize(None)
+    for y in sorted(YEARS_ALLOWED, reverse=True):
+        try:
+            df = get_schedule_df(y, _utc_today_token())
+            if not df.empty and (df['EventDate'] <= today).any():
+                return y
+        except Exception:
+            continue
+    return 2025
 
 def is_race(ses):
     t = (getattr(ses, 'session_type', '') or '').upper()
@@ -172,7 +187,6 @@ def build_gp_options(year:int):
 
 def default_event_value(year:int):
     df = get_schedule_df(year, _utc_today_token())
-    # pick the latest completed event; if none completed yet, return None
     today = pd.Timestamp.utcnow().tz_localize(None)
     past = df[df['EventDate'] <= today]
     if not past.empty:
@@ -183,21 +197,19 @@ SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
     {"label": "FP2",               "value": "FP2"},
     {"label": "FP3",               "value": "FP3"},
-    {"label": "Sprint Qualifying", "value": "SQ"},  # 2024/2025 naming
+    {"label": "Sprint Qualifying", "value": "SQ"},
     {"label": "Qualifying",        "value": "Q"},
-    {"label": "Sprint",            "value": "SR"},   # Sprint race
+    {"label": "Sprint",            "value": "SR"},
     {"label": "Race",              "value": "R"},
 ]
 
 # ---------- Loaders ----------
-@lru_cache(maxsize=64)
 @lru_cache(maxsize=32)
 def load_session_laps(year:int, event_name:str, sess_code:str):
-    """Load a session by official EventName (e.g., 'United States Grand Prix') and session code."""
+    """Load a session by official EventName and session code."""
     try:
         ses = ff1.get_session(int(year), event_name, str(sess_code))
     except Exception:
-        # Back-compat: 2023 used "SS" for Sprint Shootout
         if str(sess_code).upper() == "SQ":
             ses = ff1.get_session(int(year), event_name, "SS")
         else:
@@ -210,13 +222,10 @@ def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].dropna()
     if laps.empty:
         return {}
-    # pick the most frequent team per driver, then normalize it
     team = laps.groupby('Driver')['Team'].agg(
         lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
     ).apply(canonical_team)
-
-    # look up color from canonical name; default light grey if truly unknown
-    return {drv: TEAM_COLORS.get(t, '#cccccc') for drv, t in team.items()}
+    return {drv: TEAM_COLORS.get(t, '#999999') for drv, t in team.items()}
 
 def gap_to_leader_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
@@ -290,41 +299,23 @@ def speed_records_df(ses):
 # ================= Dash =================
 external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
-app.title = SITE_TITLE  # browser tab title
+app.title = SITE_TITLE
 
+# Keep index minimal: CSS does the work (avoid overriding with inline styles)
 app.index_string = f"""
 <!DOCTYPE html>
 <html>
 <head>
   {{%metas%}}
   <title>{SITE_TITLE}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   {{%favicon%}}
   {{%css%}}
-  <style>
-    body {{ background:{COL_BG}; color:{COL_TEXT}; }}
-    .rlo-navbar {{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:12px 16px; background:{COL_BG}; border-bottom:1px solid #1e1e24;
-    }}
-    .rlo-title {{ font-family: 'Montserrat', system-ui, Arial; font-weight:700; font-size:22px; margin:0; }}
-    .rlo-title span {{ color:{COL_RED}; }}
-    .logo-wrap img {{ height:34px; border-radius:6px; }}
-    .dbc-label {{ margin-bottom:6px; font-weight:600; }}
-    .tab {{ background:#fff !important; color:#000 !important; border:1px solid #ddd !important; }}
-    .tab--selected {{ border-bottom:3px solid {COL_RED} !important; color:#000 !important; }}
-    .Select-control, .Select-menu-outer, .Select-value-label {{ color:#000 !important; background:#fff !important; }}
-    .Select-placeholder {{ color:#333 !important; }}
-    .Select-input > input {{ color:#000 !important; }}
-    .box {{ background:{COL_PANEL}; border-radius:12px; padding:8px; }}
-  </style>
 </head>
 <body>
-  <div class="rlo-navbar">
-    <div class="logo-wrap">
-      <img src="/assets/logo.png" alt="logo"/>
-    </div>
-    <h1 class="rlo-title"><span>Telemetry</span> by RedLightsOff</h1>
-  </div>
   {{%app_entry%}}
   {{%config%}}
   {{%scripts%}}
@@ -333,45 +324,86 @@ app.index_string = f"""
 </html>
 """
 
-def header_controls():
-    return dbc.Row([
-        dbc.Col([
-            dbc.Label("Year"),
-            dcc.Dropdown(
-                id='year-dd',
-                options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
-                value=default_year_value(),
-                clearable=False
-            ),
-            html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
-        ], md=3),
-        dbc.Col([
-            dbc.Label("Grand Prix"),
-            dcc.Dropdown(
-                id='event-dd',
-                options=build_gp_options(default_year_value()),
-                value=default_event_value(default_year_value()),
-                clearable=False
-            )
-        ], md=6),
-        dbc.Col([
-            dbc.Label("Session"),
-            dcc.Dropdown(
-                id='session-dd',
-                options=SESSION_OPTIONS,
-                value='R',
-                clearable=False
-            )
-        ], md=3),
-    ], className="g-2")
+def header_bar():
+    donate = dbc.Button("Support", href=BMC_URL, target="_blank", color="danger", className="rlo-btn-pill") if BMC_URL else None
+    return html.Div(className="rlo-topbar", children=[
+        html.Div(className="rlo-brand", children=[
+            html.Div(className="rlo-logo", children="RLO"),
+            html.Div(children=[
+                html.Div(className="rlo-title", children=["Telemetry ", html.Span("by RedLightsOff", className="rlo-title-accent")]),
+                html.Div(className="rlo-subtitle", children=TAGLINE),
+            ])
+        ]),
+        html.Div(className="rlo-topbar-actions", children=[
+            donate,
+            dbc.Button("Instagram", href="https://instagram.com/redlightsoff5", target="_blank", outline=True, color="danger", className="rlo-btn-pill"),
+        ])
+    ])
 
+def hero_strip():
+    return html.Div(className="rlo-hero", children=[
+        html.Div(className="rlo-hero-left", children=[
+            html.H2("How to use", className="rlo-h2"),
+            html.Ul(className="rlo-bullets", children=[
+                html.Li([html.B("1)"), " Select Year → GP → Session"]),
+                html.Li([html.B("2)"), " Use the driver filter per chart (optional)"]),
+                html.Li([html.B("3)"), " Zoom: drag on the chart. Reset: double‑click"]),
+            ]),
+        ]),
+        html.Div(className="rlo-hero-right", children=[
+            html.Div(className="rlo-tip", children=[
+                html.Div(className="rlo-tip-title", children="Data availability"),
+                html.Div(className="rlo-tip-body", children="Sessions appear once timing data is published. If a season has no completed events yet, switch to 2025."),
+            ]),
+            html.Div(className="rlo-tip", children=[
+                html.Div(className="rlo-tip-title", children="Team colours"),
+                html.Div(className="rlo-tip-body", children="Drivers share colours by team for the selected event — swaps are handled automatically."),
+            ]),
+        ])
+    ])
 
-
-def graph_box(graph_id: str, title: str, chart_key: str):
-    """Reusable card with a driver filter dropdown + a graph."""
-    return html.Div(className="box", children=[
+def filter_card():
+    y0 = default_year_value()
+    return html.Div(className="box rlo-filter", children=[
         dbc.Row([
-            dbc.Col(html.H5(title, className="m-0"), md=6, style={"display":"flex","alignItems":"center"}),
+            dbc.Col([
+                dbc.Label("Year", className="dbc-label"),
+                dcc.Dropdown(
+                    id='year-dd',
+                    options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
+                    value=y0,
+                    clearable=False
+                ),
+                html.Div(id='year-warning', className="rlo-warning")
+            ], md=3),
+
+            dbc.Col([
+                dbc.Label("Grand Prix", className="dbc-label"),
+                dcc.Dropdown(
+                    id='event-dd',
+                    options=build_gp_options(y0),
+                    value=default_event_value(y0),
+                    clearable=False
+                )
+            ], md=6),
+
+            dbc.Col([
+                dbc.Label("Session", className="dbc-label"),
+                dcc.Dropdown(
+                    id='session-dd',
+                    options=SESSION_OPTIONS,
+                    value='R',
+                    clearable=False
+                )
+            ], md=3),
+        ], className="g-2"),
+    ])
+
+def graph_box(graph_id: str, title: str, chart_key: str, height: int = 420):
+    """Reusable card with a driver filter dropdown + a graph."""
+    return html.Div(className="box rlo-card", children=[
+        dbc.Row([
+            dbc.Col(html.Div(className="rlo-card-title", children=title), md=6),
             dbc.Col([
                 dcc.Dropdown(
                     id={"role": "drv", "chart": chart_key},
@@ -387,9 +419,10 @@ def graph_box(graph_id: str, title: str, chart_key: str):
                 id=graph_id,
                 figure=fig_empty(title),
                 config={"displayModeBar": False, "scrollZoom": True},
-                style={"height": "420px"}
+                style={"height": f"{height}px"}
             ),
-            type="default"
+            type="default",
+            className="rlo-loading"
         )
     ])
 
@@ -406,10 +439,10 @@ def tab_evolution():
     ])
 
 def tab_tyres():
-    return html.Div([ graph_box('tyre-strategy','Tyre Strategy','ty') ])
+    return html.Div([ graph_box('tyre-strategy','Tyre Strategy','ty', height=520) ])
 
 def tab_pace():
-    return html.Div([ graph_box('pace','Pace','pace') ])
+    return html.Div([ graph_box('pace','Lap-by-Lap Pace','pace', height=520) ])
 
 def tab_records():
     return html.Div([
@@ -420,30 +453,62 @@ def tab_records():
     ])
 
 def tab_speeds():
-    return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
+    return html.Div([ graph_box('speeds','Speed Metrics','spd', height=520) ])
+
+def footer_faq():
+    faq_items = [
+        ("Why is the page empty sometimes?",
+         "Most commonly: you selected a future session or a season with no completed events yet. Switch to the latest completed event or use 2025."),
+        ("Do drivers always share team colours correctly?",
+         "Yes — colours are derived from the team field in the selected session, so mid‑season swaps are handled per event."),
+        ("Why is the first load slower?",
+         "FastF1 must download and parse timing for a session at least once. After caching, repeat loads are faster."),
+    ]
+    return html.Div(className="rlo-footer", children=[
+        html.Div(className="box rlo-card", children=[
+            html.Div(className="rlo-card-title", children="FAQ"),
+            dbc.Accordion(
+                [dbc.AccordionItem(html.P(a, className="rlo-faq-text"), title=q) for q, a in faq_items],
+                start_collapsed=True,
+                always_open=False,
+                className="rlo-accordion"
+            )
+        ]),
+        html.Div(className="rlo-footnote", children=[
+            "Built with FastF1 + Plotly. Not affiliated with Formula 1.",
+        ])
+    ])
 
 app.layout = dbc.Container([
+    dcc.Location(id="url"),
+    header_bar(),
+    html.Div(className="rlo-page", children=[
+        hero_strip(),
+        filter_card(),
 
-    
-    header_controls(),
-    dcc.Tabs(
-        id="tabs",
-        value="evo",
-        parent_className="rlo-tabs-parent",
-        className="rlo-tabs",
-        children=[
-            dcc.Tab(label="Evolution", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Tyres", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
-        ],
-    ),
-    html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
-    dcc.Store(id='store'),
-    dcc.Store(id='drivers-store'),
-    dcc.Store(id='team-color-store')
-], fluid=True, className='rlo-page')
+        dcc.Tabs(
+            id="tabs",
+            value="evo",
+            parent_className="rlo-tabs-parent",
+            className="rlo-tabs",
+            children=[
+                dcc.Tab(label="Evolution", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
+                dcc.Tab(label="Tyres", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
+                dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
+                dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
+                dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
+            ],
+        ),
+        html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
+
+        # shared stores
+        dcc.Store(id='store'),
+        dcc.Store(id='drivers-store'),
+        dcc.Store(id='team-color-store'),
+
+        footer_faq()
+    ])
+], fluid=True, className="rlo-root")
 
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
@@ -482,10 +547,10 @@ def load_session_meta(year, event_name, sess_code):
 )
 def fill_dropdowns(drivers, _children, ids):
     opts = [{'label': d, 'value': d} for d in (drivers or [])]
+    # default selection: show all drivers, but you can change this later to top 10 for speed
     val = drivers or []
     n = len(ids)
     return [opts]*n, [val]*n
-
 
 # ===== Year-driven GP list + guard against future-only seasons =====
 @app.callback(
@@ -502,7 +567,6 @@ def _year_changed(year, current_event):
     try:
         opts = build_gp_options(year)
         default_ev = default_event_value(year)
-        # If user had an event selected and it's still valid, keep it; otherwise use default (latest completed) or None
         valid = {o['value'] for o in (opts or [])}
         value = current_event if current_event in valid else default_ev
         warn = ""
@@ -511,14 +575,22 @@ def _year_changed(year, current_event):
             value = None
         return opts, value, warn
     except Exception:
-        # Fail closed: don't crash the whole app
         return [], None, f"Schedule unavailable for {year}."
 
 # ---------- helper to color by team ----------
 def set_trace_color(fig, name_to_color):
     for tr in fig.data:
         c = (name_to_color or {}).get(tr.name)
-        if c: tr.update(line=dict(color=c), marker=dict(color=c))
+        if c:
+            # Some traces don't have line/marker; guard lightly
+            try:
+                tr.update(line=dict(color=c))
+            except Exception:
+                pass
+            try:
+                tr.update(marker=dict(color=c))
+            except Exception:
+                pass
     return fig
 
 # ---------- Evolution charts ----------
@@ -528,11 +600,12 @@ def set_trace_color(fig, name_to_color):
     State('team-color-store','data')
 )
 def chart_gap(data, selected, color_map):
-    if not data: return fig_empty("(no data)")
+    if not data:
+        return fig_empty("Gap", "Pick a completed event/session.")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = gap_to_leader_df(ses)
     if selected: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("Gap — no data")
+    if df.empty: return fig_empty("Gap", "No lap data in this session.")
     if is_race(ses):
         f = px.line(df, x='LapNumber', y='Gap_s', color='Driver', custom_data=['GapStr'], title='Gap to Leader (MM:SS.mmm)')
         f.update_traces(hovertemplate="%{fullData.name} — Lap %{x}<br>%{y:.3f}s (%{customdata[0]})<extra></extra>")
@@ -550,13 +623,13 @@ def chart_gap(data, selected, color_map):
     State('team-color-store','data')
 )
 def chart_lapchart(data, selected, color_map):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Lapchart")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     laps = ses.laps[['Driver','LapNumber','Position']].dropna()
     if selected: laps = laps[laps['Driver'].isin(selected)]
-    if laps.empty: return fig_empty("Lapchart — no data")
+    if laps.empty: return fig_empty("Lapchart", "No position data available.")
     f = px.line(laps, x='LapNumber', y='Position', color='Driver', title="Lapchart (lower = better)")
-    f.update_yaxes(autorange="reversed", dtick=1)
+    f.update_yaxes(autorange="reversed", dtick=1, title="Position")
     return set_trace_color(polish(f), color_map)
 
 @app.callback(
@@ -565,19 +638,19 @@ def chart_lapchart(data, selected, color_map):
     State('team-color-store','data')
 )
 def chart_evo(data, selected, color_map):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Evolution Pace")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
-    if pdf.empty: return fig_empty("Evolution — no lap data")
+    if pdf.empty: return fig_empty("Evolution Pace", "No lap times in this session.")
     pdf = pdf.sort_values(['Driver','LapNumber'])
     pdf['MA3'] = pdf.groupby('Driver', dropna=False)['LapSeconds'].transform(lambda s: s.rolling(3, min_periods=1).mean())
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
         f.add_trace(go.Scatter(x=d['LapNumber'], y=d['MA3'], mode='lines', name=str(drv),
                                hovertemplate=f"{drv} — Lap %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
-    f.update_yaxes(title="sec (MA3)", tickformat=".3f")
-    f.update_layout(title="Evolution (3-lap MA)")
+    f.update_yaxes(title="sec (3-lap MA)", tickformat=".3f")
+    f.update_layout(title="Evolution (3-lap moving average)")
     return set_trace_color(polish(f), color_map)
 
 @app.callback(
@@ -585,13 +658,14 @@ def chart_evo(data, selected, color_map):
     Input('store','data'), Input({'role':'drv','chart':'pos'}, 'value')
 )
 def chart_pos(data, selected):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Positions Gained")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = positions_gained_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("Positions Gained — (Race only / no data)")
+    if df.empty: return fig_empty("Positions Gained", "Race only (or no results available).")
     f = px.bar(df, x='Abbreviation', y='PositionsGained', title='Positions Gained', text='PositionsGained')
     f.update_traces(marker_line_width=0)
+    f.update_layout(yaxis_title="Positions")
     return polish(f)
 
 # ---------- Tyres ----------
@@ -600,24 +674,29 @@ def chart_pos(data, selected):
     Input('store','data'), Input({'role':'drv','chart':'ty'}, 'value')
 )
 def chart_tyres(data, selected):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Tyre Strategy")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     st = tyre_stints_df(ses)
     if selected: st = st[st['Driver'].isin(selected)]
-    if st.empty: return fig_empty("Tyre Strategy — no data")
+    if st.empty: return fig_empty("Tyre Strategy", "No compound data available.")
     f = go.Figure()
     order = st['Driver'].unique().tolist()[::-1]
     cmap = {'SOFT':'#DA291C','MEDIUM':'#FFD12E','HARD':'#F0F0F0','INTERMEDIATE':'#43B02A','WET':'#00A3E0'}
     for _, r in st.iterrows():
-        f.add_trace(go.Bar(x=[int(r['Laps'])], y=[r['Driver']], base=[int(r['LapStart'])-1],
-                           orientation='h', marker_color=cmap.get(str(r['Compound']).upper(), '#888'),
-                           showlegend=False,
-                           hovertemplate=f"{r['Driver']} — {r['Compound']}<br>Lap {int(r['LapStart'])}–{int(r['LapEnd'])}<extra></extra>"))
+        f.add_trace(go.Bar(
+            x=[int(r['Laps'])], y=[r['Driver']], base=[int(r['LapStart'])-1],
+            orientation='h', marker_color=cmap.get(str(r['Compound']).upper(), '#888'),
+            showlegend=False,
+            hovertemplate=f"{r['Driver']} — {r['Compound']}<br>Lap {int(r['LapStart'])}–{int(r['LapEnd'])}<extra></extra>"
+        ))
     for n,c in cmap.items():
         f.add_trace(go.Bar(x=[None], y=[None], marker_color=c, name=n, showlegend=True))
-    f.update_layout(title='Tyre Strategy', barmode='stack',
-                    yaxis=dict(categoryorder='array', categoryarray=order, title='Driver'),
-                    xaxis_title='Lap')
+    f.update_layout(
+        title='Tyre Strategy',
+        barmode='stack',
+        yaxis=dict(categoryorder='array', categoryarray=order, title='Driver'),
+        xaxis_title='Lap'
+    )
     return polish(f, grid=True)
 
 # ---------- Pace ----------
@@ -627,18 +706,20 @@ def chart_tyres(data, selected):
     State('team-color-store','data')
 )
 def chart_pace(data, selected, color_map):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Lap-by-Lap Pace")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
-    if pdf.empty: return fig_empty("Pace — no lap data")
+    if pdf.empty: return fig_empty("Lap-by-Lap Pace", "No lap times in this session.")
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
-        f.add_trace(go.Scatter(x=d['LapNumber'], y=d['LapSeconds'], mode='lines+markers',
-                               name=str(drv),
-                               hovertemplate=f"{drv} — Lap %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
+        f.add_trace(go.Scatter(
+            x=d['LapNumber'], y=d['LapSeconds'], mode='lines+markers',
+            name=str(drv),
+            hovertemplate=f"{drv} — Lap %{{x}}<br>%{{y:.3f}}s<extra></extra>"
+        ))
     f.update_yaxes(title="sec", tickformat=".3f")
-    f.update_layout(title="Lap-by-Lap Pace")
+    f.update_layout(title="Lap-by-Lap Pace", hovermode="x unified")
     return set_trace_color(polish(f), color_map)
 
 # ---------- Records ----------
@@ -648,11 +729,11 @@ def chart_pace(data, selected, color_map):
     State('team-color-store','data')
 )
 def chart_best(data, selected, color_map):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Best Laps")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     laps = ses.laps.dropna(subset=['LapTime'])
     if selected: laps = laps[laps['Driver'].isin(selected)]
-    if laps.empty: return fig_empty("Best Laps — no data")
+    if laps.empty: return fig_empty("Best Laps", "No lap times in this session.")
     best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
     best['Best_s'] = best['LapTime'].dt.total_seconds()
     best['BestStr'] = best['Best_s'].apply(s_to_mssmmm)
@@ -666,19 +747,19 @@ def chart_best(data, selected, color_map):
     Input('store','data'), Input({'role':'drv','chart':'sec'}, 'value')
 )
 def chart_sectors(data, selected):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Sector Records")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = sector_records_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("Sector Records — no data")
+    if df.empty: return fig_empty("Sector Records", "No sector data available.")
     f = go.Figure(data=[go.Table(
         header=dict(values=['Sector','Driver','Time (s)'],
                     fill_color='#FFFFFF', font=dict(color='#000000', size=12)),
         cells=dict(values=[df['Sector'], df['Driver'], df['Time (s)']],
                    fill_color='#FFFFFF', font=dict(color='#000000'))
     )])
-    f.update_layout(title="Sector Records", paper_bgcolor=COL_PANEL)
-    return brand(f)  # watermark tables too
+    f.update_layout(title="Sector Records", paper_bgcolor=COL_CARD)
+    return brand(f)
 
 # ---------- Speeds ----------
 @app.callback(
@@ -686,17 +767,17 @@ def chart_sectors(data, selected):
     Input('store','data'), Input({'role':'drv','chart':'spd'}, 'value')
 )
 def chart_speeds(data, selected):
-    if not data: return fig_empty("(no data)")
+    if not data: return fig_empty("Speed Metrics")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     spd = speed_records_df(ses)
     if selected and not spd.empty: spd = spd[spd['Driver'].isin(selected)]
-    if spd.empty: return fig_empty("Speed Records — no data")
+    if spd.empty: return fig_empty("Speed Metrics", "No speed data available.")
     if spd.shape[1] > 2:
         dm = spd.melt(id_vars='Driver', var_name='Metric', value_name='km/h')
-        f = px.bar(dm, x='Driver', y='km/h', color='Metric', barmode='group', title='Speed Records')
+        f = px.bar(dm, x='Driver', y='km/h', color='Metric', barmode='group', title='Speed Metrics')
     else:
         ycol = spd.columns[-1]
-        f = px.bar(spd, x='Driver', y=ycol, title='Speed Records')
+        f = px.bar(spd, x='Driver', y=ycol, title='Speed Metrics')
     f.update_traces(marker_line_width=0)
     f.update_layout(yaxis_title="km/h")
     return polish(f)
