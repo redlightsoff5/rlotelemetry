@@ -1,40 +1,17 @@
-# =========================
-# Python / OS junk
-# =========================
 __pycache__/
 *.py[cod]
-*$py.class
 .DS_Store
 Thumbs.db
 
-# =========================
-# Envs / secrets
-# =========================
 .env
-.env.*
 .venv/
 venv/
-ENV/
-env/
 
-# =========================
-# Build / tooling
-# =========================
-build/
-dist/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# =========================
-# Dash / Render / caches (DO NOT COMMIT)
-# =========================
+# FastF1 + app caches (do not commit)
 cache/
 .fastf1_cache/
 fastf1_cache/
 flask_cache/
-.cache/
 *.sqlite
 *.db
 *.parquet
@@ -42,18 +19,8 @@ flask_cache/
 *.arrow
 *.feather
 
-# If you generate local assets
-assets/.cache/
-
-# =========================
-# Logs
-# =========================
-*.log
-logs/
-
-# =========================
-# IDEs
-# =========================
+# IDE
 .vscode/
 .idea/
+
 
