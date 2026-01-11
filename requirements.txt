@@ -1,12 +1,17 @@
 dash
 dash-bootstrap-components
-fastf1
-dash_echarts
 pandas
 numpy
 plotly
-gunicorn
-requests-cache
-tenacity
+fastf1
+
+# caching + compression
 Flask-Caching
 Flask-Compress
+
+# ECharts wrapper (pip package name)
+dash-echarts
+
+# production server (Render)
+gunicorn
+
