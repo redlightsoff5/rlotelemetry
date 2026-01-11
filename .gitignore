@@ -1,26 +1,10 @@
 __pycache__/
-*.py[cod]
-.DS_Store
-Thumbs.db
-
+*.pyc
+.cache/
+cache/
 .env
 .venv/
 venv/
-
-# FastF1 + app caches (do not commit)
-cache/
-.fastf1_cache/
-fastf1_cache/
-flask_cache/
-*.sqlite
-*.db
-*.parquet
-*.pkl
-*.arrow
-*.feather
-
-# IDE
-.vscode/
+.DS_Store
 .idea/
-
-
+.vscode/
