@@ -11,107 +11,88 @@ body{
   color: var(--rlo-text) !important;
 }
 
-.rlo-page{
-  padding-top: 14px;
-  padding-bottom: 24px;
+.rlo-top{ margin-top: 12px; }
+
+/* Brand */
+.rlo-brand{ display:flex; align-items:center; gap:12px; }
+.rlo-logo{ height:44px; width:auto; border-radius:12px; background: var(--rlo-card); }
+.rlo-title{ font-weight:800; font-size:20px; letter-spacing:0.2px; }
+.rlo-subtitle{ font-size:13px; opacity:0.8; }
+
+/* Filter card */
+.rlo-filter-card{
+  background: rgba(255,255,255,0.85);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.10);
 }
+.rlo-label{ font-size:12px; font-weight:700; margin-bottom:4px; opacity:0.85; }
 
-a{ color: var(--rlo-red); }
-
-/* Tabs as rounded buttons */
-.rlo-tabs-parent{
+/* Tabs */
+#tabs{
   margin-top: 10px;
-  margin-bottom: 12px;
 }
-
-.rlo-tabs{
-  border-bottom: none !important;
+#tabs .tab{
+  border: 0 !important;
   background: transparent !important;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.rlo-tab{
-  border: 1px solid rgba(0,0,0,0.18) !important;
-  background: rgba(255,255,255,0.70) !important;
   color: var(--rlo-text) !important;
+  padding: 10px 14px !important;
+  margin-right: 8px !important;
   border-radius: 999px !important;
-  padding: 10px 16px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.2px;
-  transition: all 120ms ease-in-out;
+  font-weight: 800 !important;
+}
+#tabs .tab--selected{
+  background: var(--rlo-card) !important;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.10);
+  color: var(--rlo-text) !important;
 }
 
-.rlo-tab:hover{
-  background: #ffffff !important;
-  border-color: rgba(0,0,0,0.28) !important;
-  transform: translateY(-1px);
-}
-
-.rlo-tab--selected{
-  background: #ffffff !important;
-  color: var(--rlo-red) !important;
-  border-color: var(--rlo-red) !important;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-}
-
-/* Cards */
+/* Boxes */
 .box{
-  background: var(--rlo-card);
-  border-radius: 18px;
-  padding: 14px 14px 6px 14px;
-  border: 1px solid rgba(0,0,0,0.06);
-  box-shadow: 0 10px 26px rgba(0,0,0,0.10);
+  background: rgba(255,255,255,0.85);
+  border-radius: 16px;
+  padding: 10px 10px 6px 10px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.10);
+}
+.box-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 2px 6px 8px 6px;
+}
+.box h6{
+  font-weight:800;
+  margin:0;
 }
 
-.box h5{
-  font-weight: 800;
-  margin-bottom: 6px;
+/* Buttons */
+.rlo-pill-btn{
+  border-radius: 999px !important;
+  font-weight: 800 !important;
+  border: 0 !important;
+  background: rgba(0,0,0,0.06) !important;
+}
+.rlo-pill-btn:hover{
+  background: rgba(0,0,0,0.10) !important;
+}
+.rlo-support-btn{
+  border-radius: 999px !important;
+  font-weight: 800 !important;
+  border: 0 !important;
+  padding: 10px 14px !important;
+  background: var(--rlo-red) !important;
 }
 
-/* Dropdowns */
-.Select-control{
+/* Dropdown */
+.Select-control, .Select-menu-outer{
   border-radius: 14px !important;
-  border-color: rgba(0,0,0,0.16) !important;
-  box-shadow: none !important;
 }
-
 .Select.is-focused > .Select-control{
   border-color: var(--rlo-red) !important;
   box-shadow: 0 0 0 3px rgba(192,0,26,0.15) !important;
 }
 
-.Select-menu-outer{
-  border-radius: 14px !important;
-  overflow: hidden;
-}
-
 /* Plotly container tweaks */
 .js-plotly-plot, .plotly, .dash-graph{
   border-radius: 14px;
-}
-
-
-/* Logo image */
-.rlo-logo-img{
-  height: 44px;
-  width: auto;
-  border-radius: 12px;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
-}
-
-/* Quick select buttons */
-.rlo-select-group .btn{
-  border-radius: 999px !important;
-  padding: 8px 14px;
-  font-weight: 700;
-}
-.rlo-select-btn{
-  border: 1px solid rgba(0,0,0,0.18) !important;
-}
-.rlo-muted{
-  font-size: 12px;
-  opacity: 0.85;
-  margin-top: 6px;
 }
