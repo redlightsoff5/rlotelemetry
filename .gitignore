@@ -1,5 +1,59 @@
-cache/
-cache/fastf1_http_cache.sqlite
+# =========================
+# Python / OS junk
+# =========================
 __pycache__/
-.env
+*.py[cod]
+*$py.class
 .DS_Store
+Thumbs.db
+
+# =========================
+# Envs / secrets
+# =========================
+.env
+.env.*
+.venv/
+venv/
+ENV/
+env/
+
+# =========================
+# Build / tooling
+# =========================
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Dash / Render / caches (DO NOT COMMIT)
+# =========================
+cache/
+.fastf1_cache/
+fastf1_cache/
+flask_cache/
+.cache/
+*.sqlite
+*.db
+*.parquet
+*.pkl
+*.arrow
+*.feather
+
+# If you generate local assets
+assets/.cache/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# IDEs
+# =========================
+.vscode/
+.idea/
+
