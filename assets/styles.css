@@ -146,3 +146,35 @@ a{ color: var(--rlo-red); }
 .js-plotly-plot, .plotly, .dash-graph{
   border-radius: 16px;
 }
+
+/* Navbar buttons */
+.rlo-right{
+  margin-left: auto;
+  display:flex;
+  gap: 10px;
+  align-items:center;
+}
+
+.rlo-nav-btn{
+  border-radius: 999px !important;
+  border: 2px solid rgba(0,0,0,0.80) !important;
+  background: rgba(255,255,255,0.85) !important;
+  color: #111 !important;
+  font-weight: 900 !important;
+  padding: 8px 14px !important;
+}
+
+.rlo-nav-btn:hover{
+  background: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.rlo-nav-btn--ig{
+  border-color: var(--rlo-red) !important;
+  color: var(--rlo-red) !important;
+}
+
+.rlo-nav-btn:disabled{
+  opacity: 0.55;
+  transform: none;
+}
