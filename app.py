@@ -1,4 +1,3 @@
-
 import os, warnings, logging, traceback
 warnings.filterwarnings("ignore")
 logging.getLogger("fastf1").setLevel(logging.WARNING)
@@ -8,10 +7,9 @@ import pandas as pd
 import numpy as np
 from functools import lru_cache
 
-import plotly.express as px
 import plotly.graph_objects as go
 
-from dash import Dash, dcc, html, Input, Output, State, no_update, ctx, MATCH
+from dash import Dash, dcc, html, Input, Output, State, no_update
 import dash_bootstrap_components as dbc
 
 # ================= Setup & cache =================
@@ -24,11 +22,13 @@ YEARS_ALLOWED = [2025, 2026]
 SITE_TITLE = "RLO Telemetry"
 WATERMARK  = "@redlightsoff5"
 
+# Links (override in Render env vars)
+BMC_URL = os.environ.get("BMC_URL", "").strip()          # e.g. https://buymeacoffee.com/<name>
+IG_URL  = os.environ.get("IG_URL", "https://instagram.com/redlightsoff5").strip()
+
 # UI palette (matches assets/styles.css)
 COL_BG    = "#9f9797"
-COL_CARD  = "#ffffff"
 COL_TEXT  = "#111111"
-COL_RED   = "#c0001a"
 COL_GRID  = "rgba(0,0,0,0.10)"
 
 # Team colors (same for both drivers of a team; swaps handled by session Team string)
@@ -129,7 +129,7 @@ SESSION_OPTIONS = [
     {"label": "FP1", "value": "FP1"},
     {"label": "FP2", "value": "FP2"},
     {"label": "FP3", "value": "FP3"},
-    {"label": "Sprint Qualifying", "value": "SQ"},  # modern naming
+    {"label": "Sprint Qualifying", "value": "SQ"},
     {"label": "Qualifying", "value": "Q"},
     {"label": "Sprint", "value": "SR"},
     {"label": "Race", "value": "R"},
@@ -144,7 +144,6 @@ def load_session_laps(year: int, event_name: str, sess_code: str):
     try:
         ses = ff1.get_session(y, event_name, sess_code)
     except Exception:
-        # Back-compat: some years used "SS" for Sprint Shootout
         if sess_code.upper() == "SQ":
             ses = ff1.get_session(y, event_name, "SS")
         else:
@@ -152,13 +151,7 @@ def load_session_laps(year: int, event_name: str, sess_code: str):
     ses.load(laps=True, telemetry=False, weather=False, messages=False)
     return ses
 
-# ---------- Small utilities ----------
-def s_to_mssmmm(x):
-    if pd.isna(x): return ""
-    x = float(x)
-    m = int(x // 60); s = int(x % 60); ms = int(round((x - int(x))*1000))
-    return f"{m}:{s:02d}.{ms:03d}"
-
+# ---------- Helpers ----------
 def is_race(ses) -> bool:
     t = (getattr(ses, 'session_type', '') or '').upper()
     n = (getattr(ses, 'name', '') or '').upper()
@@ -172,13 +165,6 @@ def driver_team_color_map(ses) -> dict:
         lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
     ).apply(canonical_team)
     return {drv: TEAM_COLORS.get(t, '#cccccc') for drv, t in team.items()}
-
-def top_drivers_from_session(ses, n: int) -> list:
-    laps = ses.laps.dropna(subset=['LapTime'])
-    if laps.empty:
-        return []
-    best = laps.groupby('Driver')['LapTime'].min().sort_values()
-    return best.head(int(n)).index.tolist()
 
 # ---------- Plotly styling ----------
 COMMON_LAYOUT = dict(
@@ -194,7 +180,6 @@ def apply_brand(fig: go.Figure, title: str) -> go.Figure:
     fig.update_layout(title=title, **COMMON_LAYOUT, uirevision="keep")
     fig.update_xaxes(showgrid=True, gridcolor=COL_GRID, zeroline=False)
     fig.update_yaxes(showgrid=True, gridcolor=COL_GRID, zeroline=False)
-    # watermark
     fig.add_annotation(
         text=WATERMARK,
         xref="paper", yref="paper",
@@ -206,7 +191,7 @@ def apply_brand(fig: go.Figure, title: str) -> go.Figure:
 
 def empty_fig(title: str) -> go.Figure:
     fig = go.Figure()
-    fig.update_layout(showlegend=False)
+    fig.update_layout(showlegend=True)
     return apply_brand(fig, title)
 
 def set_trace_colors(fig: go.Figure, color_map: dict) -> go.Figure:
@@ -226,10 +211,10 @@ def set_trace_colors(fig: go.Figure, color_map: dict) -> go.Figure:
                 pass
     return fig
 
-def visible_for_driver(drv: str, selected: list) -> str | bool:
-    if not selected:
+def initial_visible(selected_drivers, drv: str):
+    if not selected_drivers:
         return "legendonly"
-    return True if drv in selected else "legendonly"
+    return True if drv in selected_drivers else "legendonly"
 
 # ---------- Data builders ----------
 def gap_df(ses):
@@ -313,43 +298,11 @@ app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callbac
 app.title = SITE_TITLE
 server = app.server
 
-CHARTS = [
-    # key, graph_id, title, tab
-    ("gap", "gap", "Gap to Leader", "evo"),
-    ("lapchart", "lapchart", "Lapchart (pace)", "evo"),
-    ("evo_pace", "evo-pace", "Evolution Pace (rolling)", "evo"),
-    ("pos", "pos", "Positions Gained", "evo"),
-    ("ty", "tyre-strategy", "Tyre Strategy", "tyres"),
-    ("pace", "pace", "Lap-by-Lap Pace", "pace"),
-    ("best", "best-laps", "Best Laps", "records"),
-    ("sec", "sectors", "Sector Records", "records"),
-    ("spd", "speeds", "Speed Metrics", "speeds"),
-]
-CHART_KEYS = [k for k,_,_,_ in CHARTS]
-
-def quick_buttons(chart_key: str):
-    return dbc.ButtonGroup(
-        [
-            dbc.Button("Top 5", id={"role":"q5","chart":chart_key}, className="rlo-quick-btn", n_clicks=0),
-            dbc.Button("Top 10", id={"role":"q10","chart":chart_key}, className="rlo-quick-btn", n_clicks=0),
-            dbc.Button("All", id={"role":"qall","chart":chart_key}, className="rlo-quick-btn", n_clicks=0),
-            dbc.Button("Clear", id={"role":"qclr","chart":chart_key}, className="rlo-quick-btn", n_clicks=0),
-        ],
-        className="rlo-quick-group",
-        size="sm"
-    )
-
-def graph_card(graph_id: str, title: str, chart_key: str, height: int = 420):
+def graph_card(graph_id: str, title: str, height: int = 420):
     return html.Div(
         className="box graph-card",
         children=[
-            dbc.Row(
-                [
-                    dbc.Col(html.Div(title, className="graph-title"), md=6),
-                    dbc.Col(quick_buttons(chart_key), md=6, style={"textAlign":"right"})
-                ],
-                className="g-2 align-items-center mb-1"
-            ),
+            html.Div(title, className="graph-title"),
             dcc.Loading(
                 dcc.Graph(
                     id=graph_id,
@@ -364,11 +317,21 @@ def graph_card(graph_id: str, title: str, chart_key: str, height: int = 420):
 
 def header_bar():
     logo = html.Img(src="/assets/logo.png", className="rlo-logo", alt="logo")
+    support_btn = dbc.Button(
+        "Support",
+        href=BMC_URL or "#",
+        target="_blank",
+        className="rlo-nav-btn",
+        disabled=(not bool(BMC_URL)),
+    )
+    ig_btn = dbc.Button("Instagram", href=IG_URL, target="_blank", className="rlo-nav-btn rlo-nav-btn--ig")
     return html.Div(className="rlo-navbar", children=[
-        html.Div([logo, html.Div([html.Div("RLO Telemetry", className="rlo-brand"),
-                                  html.Div("Select event/session, then use Top 5 / Top 10 / All or click legend.", className="rlo-sub")],
-                                 className="rlo-brand-wrap")],
+        html.Div([logo,
+                  html.Div([html.Div("RLO Telemetry", className="rlo-brand"),
+                            html.Div("Pick event/session. Select drivers in the dropdown or click legend names.", className="rlo-sub")],
+                           className="rlo-brand-wrap")],
                  className="rlo-left"),
+        html.Div([ig_btn, support_btn], className="rlo-right"),
     ])
 
 def controls_card():
@@ -383,7 +346,7 @@ def controls_card():
                     value=y0,
                     clearable=False
                 )
-            ], md=3),
+            ], md=2),
             dbc.Col([
                 dbc.Label("Grand Prix", className="dbc-label"),
                 dcc.Dropdown(
@@ -401,38 +364,49 @@ def controls_card():
                     value="R",
                     clearable=False
                 )
-            ], md=3),
+            ], md=2),
+            dbc.Col([
+                dbc.Label("Drivers", className="dbc-label"),
+                dcc.Dropdown(
+                    id="drivers-dd",
+                    options=[],
+                    value=[],
+                    multi=True,
+                    placeholder="Select drivers (or use the chart legend)…",
+                    clearable=True,
+                )
+            ], md=2),
         ], className="g-2")
     ])
 
 def tab_evolution():
     return html.Div([
         dbc.Row([
-            dbc.Col(graph_card("gap", "Gap to Leader", "gap"), md=6),
-            dbc.Col(graph_card("lapchart", "Lapchart (pace)", "lapchart"), md=6),
+            dbc.Col(graph_card("gap", "Gap to Leader", height=420), md=6),
+            dbc.Col(graph_card("lapchart", "Lapchart (pace)", height=420), md=6),
         ], className="g-2"),
         dbc.Row([
-            dbc.Col(graph_card("evo-pace", "Evolution Pace (rolling)", "evo_pace"), md=6),
-            dbc.Col(graph_card("pos", "Positions Gained", "pos", height=360), md=6),
+            dbc.Col(graph_card("evo-pace", "Evolution Pace (rolling)", height=420), md=6),
+            dbc.Col(graph_card("pos", "Positions Gained", height=360), md=6),
         ], className="g-2 mt-1"),
     ])
 
 def tab_tyres():
-    return html.Div([graph_card("tyre-strategy", "Tyre Strategy", "ty", height=480)])
+    return html.Div([graph_card("tyre-strategy", "Tyre Strategy", height=480)])
 
 def tab_pace():
-    return html.Div([graph_card("pace", "Lap-by-Lap Pace", "pace", height=520)])
+    return html.Div([graph_card("pace", "Lap-by-Lap Pace", height=520)])
 
 def tab_records():
     return html.Div([
         dbc.Row([
-            dbc.Col(graph_card("best-laps", "Best Laps", "best", height=420), md=6),
-            dbc.Col(graph_card("sectors", "Sector Records", "sec", height=420), md=6),
+            dbc.Col(graph_card("best-laps", "Best Laps", height=420), md=6),
+            dbc.Col(graph_card("sectors", "Sector Records", height=420), md=6),
         ], className="g-2"),
     ])
 
 def tab_speeds():
-    return html.Div([graph_card("speeds", "Speed Metrics", "spd", height=520)])
+    return html.Div([graph_card("speeds", "Speed Metrics", height=520)])
 
 app.layout = dbc.Container(
     [
@@ -457,8 +431,6 @@ app.layout = dbc.Container(
         dcc.Store(id="session-store"),
         dcc.Store(id="drivers-store"),
         dcc.Store(id="colors-store"),
-        # selection per chart (persist across tabs)
-        *[dcc.Store(id={"role":"sel", "chart":k}, data=[]) for k in CHART_KEYS],
     ],
     fluid=True
 )
@@ -473,7 +445,6 @@ def _render_tabs(tab):
         "speeds": tab_speeds
     }.get(tab, tab_evolution)()
 
-# Update GP list when year changes (and guard for future-only)
 @app.callback(
     Output("event-dd", "options"),
     Output("event-dd", "value"),
@@ -489,63 +460,35 @@ def _year_changed(year, current_event):
     value = current_event if current_event in valid else default_ev
     return opts, value
 
-# Load session meta once
 @app.callback(
     Output("session-store","data"),
     Output("drivers-store","data"),
     Output("colors-store","data"),
+    Output("drivers-dd","options"),
+    Output("drivers-dd","value"),
     Input("year-dd","value"),
     Input("event-dd","value"),
     Input("session-dd","value"),
 )
 def _load_meta(year, event_name, sess_code):
     if not year or not event_name or not sess_code:
-        return no_update, [], {}
+        return no_update, [], {}, [], []
     try:
         ses = load_session_laps(int(year), str(event_name), str(sess_code))
         laps = ses.laps.dropna(subset=["LapTime"])
         drivers = sorted(laps["Driver"].dropna().unique().tolist())
         colors = driver_team_color_map(ses)
-        return {"year": int(year), "event": str(event_name), "sess": str(sess_code)}, drivers, colors
+        opts = [{"label": d, "value": d} for d in drivers]
+        return {"year": int(year), "event": str(event_name), "sess": str(sess_code)}, drivers, colors, opts, []
     except Exception:
         traceback.print_exc()
-        return no_update, [], {}
-
-# The real MATCH callback (Dash requires concrete dict IDs; define separately)
-@app.callback(
-    Output({"role":"sel", "chart":MATCH}, "data"),
-    Input({"role":"q5","chart":MATCH}, "n_clicks"),
-    Input({"role":"q10","chart":MATCH}, "n_clicks"),
-    Input({"role":"qall","chart":MATCH}, "n_clicks"),
-    Input({"role":"qclr","chart":MATCH}, "n_clicks"),
-    State("session-store","data"),
-    prevent_initial_call=True,
-)
-def quick_select(c5, c10, call, cclr, sess_meta):
-    if not sess_meta:
-        return []
-    trig = ctx.triggered_id
-    year = sess_meta["year"]; event = sess_meta["event"]; sess = sess_meta["sess"]
-    try:
-        ses = load_session_laps(int(year), str(event), str(sess))
-    except Exception:
-        return []
-    if isinstance(trig, dict) and trig.get("role") == "qclr":
-        return []
-    if isinstance(trig, dict) and trig.get("role") == "q5":
-        return top_drivers_from_session(ses, 5)
-    if isinstance(trig, dict) and trig.get("role") == "q10":
-        return top_drivers_from_session(ses, 10)
-    if isinstance(trig, dict) and trig.get("role") == "qall":
-        laps = ses.laps.dropna(subset=["LapTime"])
-        return sorted(laps["Driver"].dropna().unique().tolist())
-    return no_update
+        return no_update, [], {}, [], []
 
 # ---------- Figures ----------
 @app.callback(
     Output("gap", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"gap"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_gap(sess_meta, selected, colors):
@@ -556,12 +499,16 @@ def fig_gap(sess_meta, selected, colors):
     df = gap_df(ses)
     if df.empty:
         return empty_fig(title)
+
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
     for drv, d in df.groupby("Driver"):
         fig.add_trace(go.Scatter(
             x=d["LapNumber"], y=d["Gap_s"], mode="lines",
             name=str(drv),
-            visible=visible_for_driver(str(drv), selected),
+            visible=initial_visible(selected, str(drv)),
             hovertemplate=f"{drv}<br>Lap %{{x}}<br>Gap %{{y:.3f}}s<extra></extra>"
         ))
     fig.update_yaxes(title="Gap (s)", tickformat=".3f")
@@ -571,7 +518,7 @@ def fig_gap(sess_meta, selected, colors):
 @app.callback(
     Output("lapchart", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"lapchart"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_lapchart(sess_meta, selected, colors):
@@ -582,12 +529,15 @@ def fig_lapchart(sess_meta, selected, colors):
     df = pace_df(ses)
     if df.empty:
         return empty_fig(title)
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
     for drv, d in df.groupby("Driver"):
         fig.add_trace(go.Scatter(
             x=d["LapNumber"], y=d["LapSeconds"], mode="lines",
             name=str(drv),
-            visible=visible_for_driver(str(drv), selected),
+            visible=initial_visible(selected, str(drv)),
             hovertemplate=f"{drv}<br>Lap %{{x}}<br>%{{y:.3f}}s<extra></extra>"
         ))
     fig.update_yaxes(title="Lap time (s)", tickformat=".3f", autorange="reversed")
@@ -597,7 +547,7 @@ def fig_lapchart(sess_meta, selected, colors):
 @app.callback(
     Output("evo-pace", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"evo_pace"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_evo_pace(sess_meta, selected, colors):
@@ -608,15 +558,18 @@ def fig_evo_pace(sess_meta, selected, colors):
     df = pace_df(ses)
     if df.empty:
         return empty_fig(title)
-    # rolling median to smooth
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     df = df.sort_values(["Driver","LapNumber"])
     df["Roll"] = df.groupby("Driver")["LapSeconds"].transform(lambda s: s.rolling(5, min_periods=1).median())
+
     fig = go.Figure()
     for drv, d in df.groupby("Driver"):
         fig.add_trace(go.Scatter(
             x=d["LapNumber"], y=d["Roll"], mode="lines",
             name=str(drv),
-            visible=visible_for_driver(str(drv), selected),
+            visible=initial_visible(selected, str(drv)),
             hovertemplate=f"{drv}<br>Lap %{{x}}<br>%{{y:.3f}}s (roll)<extra></extra>"
         ))
     fig.update_yaxes(title="Rolling lap time (s)", tickformat=".3f", autorange="reversed")
@@ -626,7 +579,7 @@ def fig_evo_pace(sess_meta, selected, colors):
 @app.callback(
     Output("pos", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"pos"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_pos(sess_meta, selected, colors):
@@ -637,14 +590,16 @@ def fig_pos(sess_meta, selected, colors):
     df = positions_df(ses)
     if df.empty:
         return empty_fig(title)
-    # One trace per driver so legend-click works
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
     for _, r in df.iterrows():
         drv = str(r["Driver"])
         fig.add_trace(go.Bar(
             x=[drv], y=[r["PositionsGained"]],
             name=drv,
-            visible=visible_for_driver(drv, selected),
+            visible=initial_visible(selected, drv),
             hovertemplate=f"{drv}<br>Gained {r['PositionsGained']}<extra></extra>"
         ))
     fig.update_layout(barmode="group")
@@ -655,7 +610,7 @@ def fig_pos(sess_meta, selected, colors):
 @app.callback(
     Output("tyre-strategy", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"ty"}, "data"),
+    Input("drivers-dd","value"),
 )
 def fig_tyres(sess_meta, selected):
     title = "Tyre Strategy"
@@ -663,10 +618,12 @@ def fig_tyres(sess_meta, selected):
         return empty_fig(title)
     if not selected:
         return empty_fig(title)
+
     ses = load_session_laps(sess_meta["year"], sess_meta["event"], sess_meta["sess"])
     st = tyre_stints_df(ses)
     if st.empty:
         return empty_fig(title)
+
     st = st[st["Driver"].isin(selected)]
     if st.empty:
         return empty_fig(title)
@@ -674,6 +631,7 @@ def fig_tyres(sess_meta, selected):
     cmap = {'SOFT':'#DA291C','MEDIUM':'#FFD12E','HARD':'#F0F0F0','INTERMEDIATE':'#43B02A','WET':'#00A3E0'}
     fig = go.Figure()
     order = list(reversed([d for d in selected if d in st["Driver"].unique().tolist()]))
+
     for _, r in st.iterrows():
         fig.add_trace(go.Bar(
             x=[int(r["Laps"])], y=[r["Driver"]], base=[int(r["LapStart"])-1],
@@ -682,9 +640,9 @@ def fig_tyres(sess_meta, selected):
             showlegend=False,
             hovertemplate=f"{r['Driver']} — {r['Compound']}<br>Lap {int(r['LapStart'])}–{int(r['LapEnd'])}<extra></extra>"
         ))
-    # legend for compounds
     for n,c in cmap.items():
         fig.add_trace(go.Bar(x=[None], y=[None], marker_color=c, name=n, showlegend=True))
+
     fig.update_layout(barmode="stack")
     fig.update_yaxes(categoryorder="array", categoryarray=order, title="Driver")
     fig.update_xaxes(title="Lap")
@@ -693,7 +651,7 @@ def fig_tyres(sess_meta, selected):
 @app.callback(
     Output("pace", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"pace"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_pace(sess_meta, selected, colors):
@@ -702,11 +660,13 @@ def fig_pace(sess_meta, selected, colors):
         return empty_fig(title)
     if not selected:
         return empty_fig(title)
+
     ses = load_session_laps(sess_meta["year"], sess_meta["event"], sess_meta["sess"])
     df = pace_df(ses)
     df = df[df["Driver"].isin(selected)]
     if df.empty:
         return empty_fig(title)
+
     fig = go.Figure()
     for drv, d in df.groupby("Driver"):
         fig.add_trace(go.Scatter(
@@ -721,93 +681,98 @@ def fig_pace(sess_meta, selected, colors):
 @app.callback(
     Output("best-laps", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"best"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_best(sess_meta, selected, colors):
     title = "Best Laps"
     if not sess_meta:
         return empty_fig(title)
-    if not selected:
-        return empty_fig(title)
     ses = load_session_laps(sess_meta["year"], sess_meta["event"], sess_meta["sess"])
     df = best_laps_df(ses)
-    df = df[df["Driver"].isin(selected)]
     if df.empty:
         return empty_fig(title)
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
     for _, r in df.iterrows():
         drv = str(r["Driver"])
         fig.add_trace(go.Bar(
-            x=[drv], y=[r["Best_s"]],
+            x=[drv], y=[float(r["Best_s"])],
             name=drv,
-            visible=True,
-            hovertemplate=f"{drv}<br>%{{y:.3f}}s<extra></extra>"
+            visible=initial_visible(selected, drv),
+            hovertemplate=f"{drv}<br>{r['Best_s']:.3f}s<extra></extra>"
         ))
-    fig.update_layout(barmode="group")
-    fig.update_yaxes(title="Best lap (s)", tickformat=".3f")
+    fig.update_yaxes(title="Best lap (s)")
     fig = apply_brand(fig, title)
     return set_trace_colors(fig, colors)
 
 @app.callback(
     Output("sectors", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"sec"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_sectors(sess_meta, selected, colors):
     title = "Sector Records"
     if not sess_meta:
         return empty_fig(title)
-    if not selected:
-        return empty_fig(title)
     ses = load_session_laps(sess_meta["year"], sess_meta["event"], sess_meta["sess"])
     df = sector_best_df(ses)
-    df = df[df["Driver"].isin(selected)]
     if df.empty:
         return empty_fig(title)
-    # bar per sector with per-driver traces (legend toggles drivers)
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
-    for drv, d in df.groupby("Driver"):
-        fig.add_trace(go.Bar(
-            x=d["Sector"], y=d["Time_s"],
-            name=str(drv),
-            visible=True,
-            hovertemplate=f"{drv}<br>%{{x}}: %{{y:.3f}}s<extra></extra>"
-        ))
+    for sec, g in df.groupby("Sector"):
+        for _, r in g.iterrows():
+            drv = str(r["Driver"])
+            fig.add_trace(go.Bar(
+                x=[sec], y=[float(r["Time_s"])],
+                name=drv,
+                visible=initial_visible(selected, drv),
+                hovertemplate=f"{sec}<br>{drv}<br>{r['Time_s']:.3f}s<extra></extra>"
+            ))
     fig.update_layout(barmode="group")
-    fig.update_yaxes(title="Time (s)", tickformat=".3f", autorange=False)
+    fig.update_yaxes(title="Time (s)")
     fig = apply_brand(fig, title)
     return set_trace_colors(fig, colors)
 
 @app.callback(
     Output("speeds", "figure"),
     Input("session-store","data"),
-    Input({"role":"sel","chart":"spd"}, "data"),
+    Input("drivers-dd","value"),
     State("colors-store","data"),
 )
 def fig_speeds(sess_meta, selected, colors):
     title = "Speed Metrics"
     if not sess_meta:
         return empty_fig(title)
-    if not selected:
-        return empty_fig(title)
     ses = load_session_laps(sess_meta["year"], sess_meta["event"], sess_meta["sess"])
     df = speed_df(ses)
-    df = df[df["Driver"].isin(selected)]
     if df.empty:
         return empty_fig(title)
+    if selected:
+        df = df[df["Driver"].isin(selected)]
+
     fig = go.Figure()
-    for drv, d in df.groupby("Driver"):
+    for drv, g in df.groupby("Driver"):
         fig.add_trace(go.Bar(
-            x=d["Metric"], y=d["kmh"],
+            x=g["Metric"], y=g["kmh"],
             name=str(drv),
-            hovertemplate=f"{drv}<br>%{{x}}: %{{y:.0f}} km/h<extra></extra>"
+            visible=initial_visible(selected, str(drv)),
+            hovertemplate=f"{drv}<br>%{{x}}: %{{y:.1f}} km/h<extra></extra>"
         ))
     fig.update_layout(barmode="group")
     fig.update_yaxes(title="km/h")
     fig = apply_brand(fig, title)
     return set_trace_colors(fig, colors)
 
+@app.get("/health")
+def _health():
+    return {"ok": True}
+
 if __name__ == "__main__":
-    app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
+    app.run_server(host="0.0.0.0", port=int(os.environ.get("PORT", "8050")), debug=True)
