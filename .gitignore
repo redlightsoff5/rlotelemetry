@@ -7,7 +7,7 @@ Thumbs.db
 .venv/
 venv/
 
-# FastF1 + app caches (do not commit)
+# caches (do not commit)
 cache/
 .fastf1_cache/
 fastf1_cache/
