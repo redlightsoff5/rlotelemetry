@@ -1,0 +1,117 @@
+:root{
+  --bg:#9f9797;
+  --card:#ffffff;
+  --text:#111111;
+  --muted:#444444;
+  --red:#e11d2e;
+  --border:#000000;
+  --radius:16px;
+}
+
+/* Page */
+html, body{
+  margin:0;
+  padding:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+/* Top bar */
+.rlo-navbar{
+  position:sticky;
+  top:0;
+  z-index:1000;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:10px 16px;
+  background:#0b0b0d;
+  border-bottom:2px solid #000;
+}
+.logo-wrap img{
+  height:34px;
+  width:34px;
+  object-fit:cover;
+  border-radius:10px;
+  border:2px solid #fff;
+}
+.rlo-brand{ display:flex; flex-direction:column; line-height:1.05; }
+.rlo-title{ color:#fff; font-weight:800; font-size:18px; letter-spacing:0.2px; }
+.rlo-title span{ color:var(--red); }
+.rlo-subtitle{ color:#c9c9c9; font-size:12px; font-weight:600; }
+
+.rlo-actions{ margin-left:auto; display:flex; gap:10px; }
+.rlo-action{
+  text-decoration:none;
+  font-weight:800;
+  font-size:12px;
+  padding:8px 12px;
+  border-radius:999px;
+  border:2px solid #000;
+  background:#fff;
+  color:#000;
+}
+.rlo-action:hover{ transform:translateY(-1px); }
+
+.rlo-bmc{ background:#FFDD00; }
+.rlo-ig{ background:#fff; }
+
+/* Filter row card (wrap your dropdowns in a container with class rlo-filter if not already) */
+.rlo-filter{
+  background:var(--card);
+  border:2px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:0 6px 18px rgba(0,0,0,0.18);
+  padding:12px;
+  margin:12px 16px;
+}
+
+/* Tabs -> pill buttons */
+.rlo-tabs .tab{
+  border:2px solid var(--border) !important;
+  border-radius:999px !important;
+  padding:10px 14px !important;
+  margin-right:10px !important;
+  background:var(--card) !important;
+  color:#000 !important;
+  font-weight:800 !important;
+}
+.rlo-tabs .tab--selected{
+  background:#000 !important;
+  color:#fff !important;
+  border-color:#000 !important;
+}
+.rlo-tabs{
+  padding:0 16px;
+}
+
+/* Graph cards */
+.rlo-card{
+  background:var(--card);
+  border:3px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:0 10px 24px rgba(0,0,0,0.22);
+  padding:10px 10px 2px 10px;
+  margin:12px 16px;
+}
+.rlo-card .card-title{
+  font-weight:900;
+  color:#000;
+  margin:0 0 6px 2px;
+}
+
+/* Make Plotly graph container match card rounding */
+.js-plotly-plot, .plot-container, .svg-container{
+  border-radius:12px;
+}
+
+/* Dropdowns - force light look */
+.Select-control{
+  border-radius:12px !important;
+  border:2px solid #000 !important;
+}
+.Select-menu-outer{ border:2px solid #000 !important; }
+
+/* Hide default Dash loading text overflow */
+._dash-loading{ color:#000 !important; }
