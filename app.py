@@ -326,46 +326,40 @@ external_stylesheets=[dbc.themes.CYBORG]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 app.title = SITE_TITLE  # browser tab title
 
-app.index_string = f"""
+app.index_string = """
 <!DOCTYPE html>
 <html>
-<head>
-  {{%metas%}}
-  <title>{SITE_TITLE}</title>
-  {{%favicon%}}
-  {{%css%}}
-  <style>
-    body {{ background:{COL_BG}; color:{COL_TEXT}; }}
-    .rlo-navbar {{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:12px 16px; background:{COL_BG}; border-bottom:1px solid #1e1e24;
-    }}
-    .rlo-title {{ font-family: 'Montserrat', system-ui, Arial; font-weight:700; font-size:22px; margin:0; }}
-    .rlo-title span {{ color:{COL_RED}; }}
-    .logo-wrap img {{ height:34px; border-radius:6px; }}
-    .dbc-label {{ margin-bottom:6px; font-weight:600; }}
-    .tab {{ background:#fff !important; color:#000 !important; border:1px solid #ddd !important; }}
-    .tab--selected {{ border-bottom:3px solid {COL_RED} !important; color:#000 !important; }}
-    .Select-control, .Select-menu-outer, .Select-value-label {{ color:#000 !important; background:#fff !important; }}
-    .Select-placeholder {{ color:#333 !important; }}
-    .Select-input > input {{ color:#000 !important; }}
-    .box {{ background:{COL_PANEL}; border-radius:12px; padding:8px; }}
-  </style>
-</head>
-<body>
-  <div class="rlo-navbar">
-    <div class="logo-wrap">
-      <img src="/assets/logo.png" alt="logo"/>
-    </div>
-    <h1 class="rlo-title"><span>Telemetry</span> by RedLightsOff</h1>
-  </div>
-  {{%app_entry%}}
-  {{%config%}}
-  {{%scripts%}}
-  {{%renderer%}}
-</body>
+    <head>
+        {%metas%}
+        <title>RLO Telemetry</title>
+        {%favicon%}
+        {%css%}
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+
+        <!-- Buy Me a Coffee widget -->
+        <script type="text/javascript"
+            src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js"
+            data-name="bmc-button"
+            data-slug="redlightsoff5"
+            data-color="#FFDD00"
+            data-emoji="🏎️"
+            data-font="Arial"
+            data-text="Apoya esta página"
+            data-outline-color="#000000"
+            data-font-color="#000000"
+            data-coffee-color="#ffffff">
+        </script>
+    </body>
 </html>
 """
+
 
 def header_controls():
     return dbc.Row([
