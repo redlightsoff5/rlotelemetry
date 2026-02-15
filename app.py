@@ -228,6 +228,12 @@ SESSION_OPTIONS = [
     {"label": "Race",              "value": "R"},
 ]
 
+TEST_SESSION_OPTIONS = [
+    {"label": "Day 1", "value": "T1"},
+    {"label": "Day 2", "value": "T2"},
+    {"label": "Day 3", "value": "T3"},
+]
+
 # ---------- Loaders ----------
 @lru_cache(maxsize=64)
 @lru_cache(maxsize=32)
@@ -501,6 +507,26 @@ app.layout = dbc.Container([
 def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
             "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
+
+@app.callback(
+    Output('session-dd','options'),
+    Output('session-dd','value'),
+    Input('event-dd','value'),
+    State('session-dd','value')
+)
+def _event_changed_set_sessions(event_val, current):
+    if not event_val:
+        return SESSION_OPTIONS, 'R'
+
+    kind = str(event_val).split("|", 1)[0]
+    if kind == "TEST":
+        valid = {o["value"] for o in TEST_SESSION_OPTIONS}
+        new_val = current if current in valid else "T1"
+        return TEST_SESSION_OPTIONS, new_val
+
+    valid = {o["value"] for o in SESSION_OPTIONS}
+    new_val = current if current in valid else "R"
+    return SESSION_OPTIONS, new_val
 
 # ===== Load session once =====
 @app.callback(
