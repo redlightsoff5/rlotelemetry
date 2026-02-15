@@ -105,7 +105,7 @@ TEAM_ALIASES = {
     'audi': 'Sauber',
 
     'haas': 'Haas',
-    'haas f1': 'Haas'
+    'haas f1': 'Haas',
 
     # Cadillac / GM (2026+)
     'cadillac': 'Cadillac',
