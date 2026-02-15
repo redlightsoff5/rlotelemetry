@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 pio.templates.default = 'plotly_white'
+
 from dash import Dash, dcc, html, Input, Output, State, no_update, ALL
 import dash_bootstrap_components as dbc
 
@@ -62,7 +63,9 @@ TEAM_COLORS = {
     'Williams':      '#64C4FF',
     'Racing Bulls':  '#6692FF',
     'Sauber':        '#52E252',
-    'Haas':          '#B6BABD'
+    'Haas':          '#B6BABD',
+    'Cadillac':      '#000000'
+
 }
 
 # Map many possible FastF1 team strings to a canonical key in TEAM_COLORS
@@ -103,8 +106,21 @@ TEAM_ALIASES = {
 
     'haas': 'Haas',
     'haas f1': 'Haas'
+
+    # Cadillac / GM (2026+)
+    'cadillac': 'Cadillac',
+    'gm cadillac': 'Cadillac',
+    'cadillac f1': 'Cadillac',
+    'cadillac f1 team': 'Cadillac',
+    'andretti': 'Cadillac',          # por si FastF1 lo etiqueta así en algún punto
+
 }
 
+DRIVER_TEAM_OVERRIDE = {
+    # Force team colour if Team string is missing/odd in some sessions
+    (2026, 'PER'): 'Cadillac',
+    (2026, 'BOT'): 'Cadillac',
+}
 
 def canonical_team(name: str) -> str:
     if not isinstance(name, str):
@@ -113,8 +129,7 @@ def canonical_team(name: str) -> str:
     for key, canon in TEAM_ALIASES.items():
         if key in s:
             return canon
-    return name  # fallback to raw string (may still match a TEAM_COLORS key)
-
+    return name  # fallback
 
 COMMON_LAYOUT = dict(
     paper_bgcolor=COL_PANEL,
@@ -128,7 +143,6 @@ def brand(fig):
     fig.update_layout(**COMMON_LAYOUT)
     fig.update_xaxes(showgrid=False, zeroline=False)
     fig.update_yaxes(showgrid=False, zeroline=False)
-    # watermark (center of plotting area)
     fig.add_annotation(
         text=WATERMARK,
         xref="paper", yref="paper",
@@ -165,52 +179,48 @@ def is_race(ses):
 # ---------- Live Schedule & Options ----------
 @lru_cache(maxsize=8)
 def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
-    # IMPORTANT: include_testing=True so Pre-Season Testing appears
+    # IMPORTANT: include testing in schedule
     df = ff1.get_event_schedule(year, include_testing=True).copy()
     df['EventDate'] = pd.to_datetime(df['EventDate'])
     df['EventFormat'] = df['EventFormat'].astype(str).str.lower()
-
-    # Keep what we need
     df = df[['RoundNumber','EventName','EventFormat','EventDate']].sort_values(['EventDate','RoundNumber']).reset_index(drop=True)
     return df
 
 def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
 
-    # Identify testing events and assign test_number by chronological order
+    # determine test_number by chronological order among testing events
     testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
     test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
 
     opts = []
     for _, r in df.sort_values(['EventDate','RoundNumber']).iterrows():
-        name = str(r.EventName)
+        fmt = str(r.EventFormat).lower()
         date = r.EventDate.date()
-        fmt  = str(r.EventFormat).lower()
+        name = str(r.EventName)
 
-        if fmt == 'testing':
-            # test_number is 1..N by date
+        if fmt == "testing":
             test_number = test_dates.index(str(date)) + 1
             opts.append({
-                'label': f"Pre-Season Testing #{test_number} ({date})",
-                'value': f"TEST|{test_number}"
+                "label": f"Pre-Season Testing #{test_number} ({date})",
+                "value": f"TEST|{test_number}"
             })
         else:
             opts.append({
-                'label': f"R{int(r.RoundNumber)} — {name} ({date})",
-                'value': f"GP|{name}"
+                "label": f"R{int(r.RoundNumber)} — {name} ({date})",
+                "value": f"GP|{name}"
             })
+    return opts
 
 def default_event_value(year:int):
     df = get_schedule_df(year, _utc_today_token())
     today = pd.Timestamp.utcnow().tz_localize(None)
-
     past = df[df['EventDate'] <= today].sort_values('EventDate')
     if past.empty:
         return None
 
     last = past.iloc[-1]
     if str(last['EventFormat']).lower() == 'testing':
-        # determine test_number by date order among tests
         testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
         test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
         test_number = test_dates.index(str(last['EventDate'].date())) + 1
@@ -222,9 +232,9 @@ SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
     {"label": "FP2",               "value": "FP2"},
     {"label": "FP3",               "value": "FP3"},
-    {"label": "Sprint Qualifying", "value": "SQ"},  # 2024/2025 naming
+    {"label": "Sprint Qualifying", "value": "SQ"},
     {"label": "Qualifying",        "value": "Q"},
-    {"label": "Sprint",            "value": "SR"},   # Sprint race
+    {"label": "Sprint",            "value": "SR"},
     {"label": "Race",              "value": "R"},
 ]
 
@@ -236,12 +246,11 @@ TEST_SESSION_OPTIONS = [
 
 # ---------- Loaders ----------
 @lru_cache(maxsize=64)
-@lru_cache(maxsize=32)
 def load_session_laps(year:int, event_value:str, sess_code:str):
     """
     event_value:
       - 'GP|<EventName>'
-      - 'TEST|<test_number>'
+      - 'TEST|<test_number>'  (1..)
     sess_code:
       - GP: FP1/FP2/FP3/SQ/Q/SR/R
       - TEST: T1/T2/T3
@@ -252,8 +261,8 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
     kind, payload = event_value.split("|", 1)
 
     if kind == "TEST":
-        test_number = int(payload)                # 1 or 2
-        day_number = int(sess_code.replace("T",""))  # T1->1, T2->2, T3->3
+        test_number = int(payload)
+        day_number = int(sess_code.replace("T", ""))  # T1->1
         ses = ff1.get_testing_session(int(year), test_number, day_number)
         ses.load(laps=True, telemetry=False, weather=False, messages=False)
         return ses
@@ -272,16 +281,34 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
 
 # ---------- Builders ----------
 def driver_team_color_map(ses):
-    laps = ses.laps[['Driver','Team']].dropna()
-    if laps.empty:
+    laps = ses.laps[['Driver','Team']].copy() if hasattr(ses, "laps") else pd.DataFrame()
+    if laps.empty or 'Driver' not in laps.columns:
         return {}
-    # pick the most frequent team per driver, then normalize it
-    team = laps.groupby('Driver')['Team'].agg(
-        lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
-    ).apply(canonical_team)
 
-    # look up color from canonical name; default light grey if truly unknown
-    return {drv: TEAM_COLORS.get(t, '#cccccc') for drv, t in team.items()}
+    year = None
+    try:
+        year = int(getattr(getattr(ses, "event", None), "year", None) or 0) or None
+    except Exception:
+        year = None
+
+    # Normalize team per driver if present
+    laps = laps.dropna(subset=['Driver'])
+    team_series = None
+    if 'Team' in laps.columns and laps['Team'].notna().any():
+        team_series = laps.dropna(subset=['Team']).groupby('Driver')['Team'].agg(
+            lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
+        ).apply(canonical_team)
+
+    # Build final map with overrides
+    out = {}
+    drivers = laps['Driver'].dropna().unique().tolist()
+    for drv in drivers:
+        forced = DRIVER_TEAM_OVERRIDE.get((year, drv)) if year else None
+        team = forced or (team_series.get(drv) if team_series is not None and drv in team_series.index else None)
+        team = canonical_team(team) if isinstance(team, str) else (forced or "")
+        out[drv] = TEAM_COLORS.get(team, '#cccccc')
+
+    return out
 
 def gap_to_leader_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
@@ -392,13 +419,14 @@ app.index_string = f"""<!DOCTYPE html>
 """
 
 def header_controls():
+    y0 = default_year_value()
     return dbc.Row([
         dbc.Col([
             dbc.Label("Year"),
             dcc.Dropdown(
                 id='year-dd',
                 options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
-                value=default_year_value(),
+                value=y0,
                 clearable=False
             ),
             html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
@@ -407,8 +435,8 @@ def header_controls():
             dbc.Label("Grand Prix"),
             dcc.Dropdown(
                 id='event-dd',
-                options=build_gp_options(default_year_value()),
-                value=default_event_value(default_year_value()),
+                options=build_gp_options(y0),
+                value=default_event_value(y0),
                 clearable=False
             )
         ], md=6),
@@ -423,10 +451,7 @@ def header_controls():
         ], md=3),
     ], className="g-2")
 
-
-
 def graph_box(graph_id: str, title: str, chart_key: str):
-    """Reusable card with a driver filter dropdown + a graph."""
     return html.Div(className="box", children=[
         dbc.Row([
             dbc.Col(html.H5(title, className="m-0"), md=6, style={"display":"flex","alignItems":"center"}),
@@ -481,8 +506,6 @@ def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
 app.layout = dbc.Container([
-
-    
     header_controls(),
     dcc.Tabs(
         id="tabs",
@@ -508,6 +531,7 @@ def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
             "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
 
+# NEW: Session dropdown changes depending on whether event is TEST or GP
 @app.callback(
     Output('session-dd','options'),
     Output('session-dd','value'),
@@ -538,7 +562,7 @@ def _event_changed_set_sessions(event_val, current):
     Input('session-dd','value')
 )
 def load_session_meta(year, event_value, sess_code):
-    if not year or not event_name or not sess_code:
+    if not year or not event_value or not sess_code:
         return no_update, [], {}
     try:
         ses = load_session_laps(int(year), str(event_value), str(sess_code))
@@ -564,7 +588,6 @@ def fill_dropdowns(drivers, _children, ids):
     n = len(ids)
     return [opts]*n, [val]*n
 
-
 # ===== Year-driven GP list + guard against future-only seasons =====
 @app.callback(
     Output('event-dd','options'),
@@ -580,7 +603,6 @@ def _year_changed(year, current_event):
     try:
         opts = build_gp_options(year)
         default_ev = default_event_value(year)
-        # If user had an event selected and it's still valid, keep it; otherwise use default (latest completed) or None
         valid = {o['value'] for o in (opts or [])}
         value = current_event if current_event in valid else default_ev
         warn = ""
@@ -589,14 +611,14 @@ def _year_changed(year, current_event):
             value = None
         return opts, value, warn
     except Exception:
-        # Fail closed: don't crash the whole app
         return [], None, f"Schedule unavailable for {year}."
 
 # ---------- helper to color by team ----------
 def set_trace_color(fig, name_to_color):
     for tr in fig.data:
         c = (name_to_color or {}).get(tr.name)
-        if c: tr.update(line=dict(color=c), marker=dict(color=c))
+        if c:
+            tr.update(line=dict(color=c), marker=dict(color=c))
     return fig
 
 # ---------- Evolution charts ----------
@@ -756,7 +778,7 @@ def chart_sectors(data, selected):
                    fill_color='#FFFFFF', font=dict(color='#000000'))
     )])
     f.update_layout(title="Sector Records", paper_bgcolor=COL_PANEL)
-    return brand(f)  # watermark tables too
+    return brand(f)
 
 # ---------- Speeds ----------
 @app.callback(
@@ -781,8 +803,6 @@ def chart_speeds(data, selected):
 
 # ================= Run =================
 server = app.server
-
-
 from flask import jsonify
 
 @server.route("/health", methods=["GET"])
@@ -791,24 +811,36 @@ def health():
 
 @server.route("/warmup", methods=["GET"])
 def warmup():
-    # Lightweight warmup: ensure schedule cache exists and try loading latest past session for allowed years.
+    # Warmup schedule + try loading last past session/test for allowed years
     try:
+        now = pd.Timestamp.utcnow().tz_localize(None)
         for y in YEARS_ALLOWED:
             try:
-                sched = ff1.get_event_schedule(y)
-                past = sched[sched["EventDate"] <= pd.Timestamp.utcnow().date()]
-                if len(past) == 0:
+                df = get_schedule_df(y, _utc_today_token())
+                past = df[df["EventDate"] <= now].sort_values("EventDate")
+                if past.empty:
                     continue
                 last = past.iloc[-1]
-                gp = last["EventName"]
-                # Try Race first, then Qualifying
-                for sess_name in ("R", "Q"):
+
+                if str(last["EventFormat"]).lower() == "testing":
+                    # pick test_number by date order
+                    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+                    test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
+                    test_number = test_dates.index(str(last["EventDate"].date())) + 1
                     try:
-                        s = ff1.get_session(y, gp, sess_name)
+                        s = ff1.get_testing_session(y, test_number, 1)
                         s.load(telemetry=False, weather=False, messages=False)
-                        break
                     except Exception:
-                        continue
+                        pass
+                else:
+                    gp = str(last["EventName"])
+                    for sess_name in ("R", "Q"):
+                        try:
+                            s = ff1.get_session(y, gp, sess_name)
+                            s.load(telemetry=False, weather=False, messages=False)
+                            break
+                        except Exception:
+                            continue
             except Exception:
                 continue
         return jsonify(status="warmed")
