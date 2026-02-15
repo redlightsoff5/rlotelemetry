@@ -431,15 +431,18 @@ def header_controls():
             ),
             html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
         ], md=3),
+
         dbc.Col([
             dbc.Label("Grand Prix"),
             dcc.Dropdown(
                 id='event-dd',
                 options=build_gp_options(y0),
                 value=default_event_value(y0),
-                clearable=False
+                clearable=False,
+                placeholder="Select event..."
             )
         ], md=6),
+
         dbc.Col([
             dbc.Label("Session"),
             dcc.Dropdown(
