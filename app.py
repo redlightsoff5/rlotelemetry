@@ -165,24 +165,58 @@ def is_race(ses):
 # ---------- Live Schedule & Options ----------
 @lru_cache(maxsize=8)
 def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
-    df = ff1.get_event_schedule(year, include_testing=False).copy()
+    # IMPORTANT: include_testing=True so Pre-Season Testing appears
+    df = ff1.get_event_schedule(year, include_testing=True).copy()
     df['EventDate'] = pd.to_datetime(df['EventDate'])
-    df = df[['RoundNumber','EventName','EventDate']].sort_values('RoundNumber').reset_index(drop=True)
+    df['EventFormat'] = df['EventFormat'].astype(str).str.lower()
+
+    # Keep what we need
+    df = df[['RoundNumber','EventName','EventFormat','EventDate']].sort_values(['EventDate','RoundNumber']).reset_index(drop=True)
     return df
 
 def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
-    return [{'label': f"R{int(r.RoundNumber)} — {r.EventName} ({r.EventDate.date()})",
-             'value': r.EventName} for _, r in df.iterrows()]
+
+    # Identify testing events and assign test_number by chronological order
+    testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
+    test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
+
+    opts = []
+    for _, r in df.sort_values(['EventDate','RoundNumber']).iterrows():
+        name = str(r.EventName)
+        date = r.EventDate.date()
+        fmt  = str(r.EventFormat).lower()
+
+        if fmt == 'testing':
+            # test_number is 1..N by date
+            test_number = test_dates.index(str(date)) + 1
+            opts.append({
+                'label': f"Pre-Season Testing #{test_number} ({date})",
+                'value': f"TEST|{test_number}"
+            })
+        else:
+            opts.append({
+                'label': f"R{int(r.RoundNumber)} — {name} ({date})",
+                'value': f"GP|{name}"
+            })
 
 def default_event_value(year:int):
     df = get_schedule_df(year, _utc_today_token())
-    # pick the latest completed event; if none completed yet, return None
     today = pd.Timestamp.utcnow().tz_localize(None)
-    past = df[df['EventDate'] <= today]
-    if not past.empty:
-        return past.iloc[-1]['EventName']
-    return None
+
+    past = df[df['EventDate'] <= today].sort_values('EventDate')
+    if past.empty:
+        return None
+
+    last = past.iloc[-1]
+    if str(last['EventFormat']).lower() == 'testing':
+        # determine test_number by date order among tests
+        testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
+        test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
+        test_number = test_dates.index(str(last['EventDate'].date())) + 1
+        return f"TEST|{test_number}"
+
+    return f"GP|{str(last['EventName'])}"
 
 SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
@@ -197,13 +231,33 @@ SESSION_OPTIONS = [
 # ---------- Loaders ----------
 @lru_cache(maxsize=64)
 @lru_cache(maxsize=32)
-def load_session_laps(year:int, event_name:str, sess_code:str):
-    """Load a session by official EventName (e.g., 'United States Grand Prix') and session code."""
+def load_session_laps(year:int, event_value:str, sess_code:str):
+    """
+    event_value:
+      - 'GP|<EventName>'
+      - 'TEST|<test_number>'
+    sess_code:
+      - GP: FP1/FP2/FP3/SQ/Q/SR/R
+      - TEST: T1/T2/T3
+    """
+    event_value = str(event_value)
+    sess_code = str(sess_code).upper()
+
+    kind, payload = event_value.split("|", 1)
+
+    if kind == "TEST":
+        test_number = int(payload)                # 1 or 2
+        day_number = int(sess_code.replace("T",""))  # T1->1, T2->2, T3->3
+        ses = ff1.get_testing_session(int(year), test_number, day_number)
+        ses.load(laps=True, telemetry=False, weather=False, messages=False)
+        return ses
+
+    # GP normal
+    event_name = payload
     try:
-        ses = ff1.get_session(int(year), event_name, str(sess_code))
+        ses = ff1.get_session(int(year), event_name, sess_code)
     except Exception:
-        # Back-compat: 2023 used "SS" for Sprint Shootout
-        if str(sess_code).upper() == "SQ":
+        if sess_code == "SQ":
             ses = ff1.get_session(int(year), event_name, "SS")
         else:
             raise
@@ -457,15 +511,15 @@ def _render_tabs(val):
     Input('event-dd','value'),
     Input('session-dd','value')
 )
-def load_session_meta(year, event_name, sess_code):
+def load_session_meta(year, event_value, sess_code):
     if not year or not event_name or not sess_code:
         return no_update, [], {}
     try:
-        ses = load_session_laps(int(year), str(event_name), str(sess_code))
+        ses = load_session_laps(int(year), str(event_value), str(sess_code))
         laps = ses.laps.dropna(subset=['LapTime'])
         drivers = sorted(laps['Driver'].dropna().unique().tolist())
         colors = driver_team_color_map(ses)
-        return {'year': int(year), 'event': str(event_name), 'sess': str(sess_code)}, drivers, colors
+        return {'year': int(year), 'event': str(event_value), 'sess': str(sess_code)}, drivers, colors
     except Exception:
         traceback.print_exc()
         return no_update, [], {}
