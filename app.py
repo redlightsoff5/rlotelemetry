@@ -193,10 +193,12 @@ def get_schedule_df(year: int, date_token: str) -> pd.DataFrame:
         ["EventDate", "RoundNumber"]
     ).reset_index(drop=True)
 
-def build_gp_options(year: int):
+def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
-    testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate")
-    test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
+    testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate").reset_index(drop=True)
+
+    # stable numbering: 1..N in chronological order (EventDate + EventName)
+    test_keys = {(r.EventDate.date(), str(r.EventName)): i+1 for i, r in testing_df.iterrows()}
 
     opts = []
     for _, r in df.iterrows():
@@ -204,27 +206,69 @@ def build_gp_options(year: int):
         date = r.EventDate.date()
         name = str(r.EventName)
         if "test" in fmt:
-            test_number = test_dates.index(str(date)) + 1
-            opts.append({"label": f"Pre-Season Testing #{test_number} ({date})", "value": f"TEST|{test_number}"})
+            n = test_keys.get((date, name), 1)
+            opts.append({"label": f"Test de Pretemporada #{n} ({date})", "value": f"TEST|{n}"})
         else:
-            opts.append({"label": f"R{int(r.RoundNumber)} — {name} ({date})", "value": f"GP|round={int(r.RoundNumber)}|name={name}"})
+            opts.append({"label": f"R{int(r.RoundNumber)} — {name} ({date})",
+                         "value": f"GP|round={int(r.RoundNumber)}|name={name}"})
     return opts
 
-def default_event_value(year: int):
+def default_event_value(year:int):
     df = get_schedule_df(year, _utc_today_token())
     today = pd.Timestamp.utcnow().tz_localize(None)
-    past = df[df["EventDate"] <= today].sort_values("EventDate")
-    if past.empty:
-        return None
+    past = df[df['EventDate'] <= today].sort_values('EventDate')
+    if not past.empty:
+        last = past.iloc[-1]
+        if "test" in str(last["EventFormat"]).lower():
+            testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate").reset_index(drop=True)
+            test_keys = {(r.EventDate.date(), str(r.EventName)): i+1 for i, r in testing_df.iterrows()}
+            n = test_keys.get((last["EventDate"].date(), str(last["EventName"])), 1)
+            return f"TEST|{n}"
+        return f"GP|round={int(last['RoundNumber'])}|name={str(last['EventName'])}"
+    return None
 
-    last = past.iloc[-1]
-    if "test" in str(last["EventFormat"]).lower():
-        testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate").reset_index(drop=True)
-        test_keys = {(r.EventDate.date(), str(r.EventName)): i + 1 for i, r in testing_df.iterrows()}
-        test_number = test_keys.get((last["EventDate"].date(), str(last["EventName"])), 1)
-        return f"TEST|{test_number}"
+SESSION_OPTIONS = [
+    {"label": "FP1", "value": "FP1"},
+    {"label": "FP2", "value": "FP2"},
+    {"label": "FP3", "value": "FP3"},
+    {"label": "Sprint Qualifying", "value": "SQ"},
+    {"label": "Qualifying", "value": "Q"},
+    {"label": "Sprint", "value": "SR"},
+    {"label": "Race", "value": "R"},
+]
+TEST_SESSION_OPTIONS = [
+    {"label": "Day 1", "value": "T1"},
+    {"label": "Day 2", "value": "T2"},
+    {"label": "Day 3", "value": "T3"},
+]
 
-    return f"GP|round={int(last['RoundNumber'])}|name={str(last['EventName'])}"
+@lru_cache(maxsize=64)
+def load_session(year: int, event_value: str, sess_code: str, telemetry: bool = False):
+    event_value = str(event_value)
+    sess_code = str(sess_code).upper()
+    kind, payload = event_value.split("|", 1)
+
+    if kind == "TEST":
+        test_number = int(payload)
+        day_number = int(sess_code.replace("T", ""))
+        ses = ff1.get_testing_session(int(year), test_number, day_number)
+        ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
+        return ses
+
+    name = payload.split("|name=", 1)[-1]
+    try:
+        ses = ff1.get_session(int(year), name, sess_code)
+    except Exception:
+        if sess_code == "SQ":
+            ses = ff1.get_session(int(year), name, "SS")
+        else:
+            raise
+    ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
+    return ses
+
+@lru_cache(maxsize=64)
+def load_session_laps(year: int, event_value: str, sess_code: str):
+    return load_session(year, event_value, sess_code, telemetry=False)
 
 def session_year(ses) -> int:
     try:
