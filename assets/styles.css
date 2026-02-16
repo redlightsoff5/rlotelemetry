@@ -1,55 +1,58 @@
 
 :root{
-  --bg:#9f9797;
-  --panel:#ffffff;
-  --red:#e11d2e;
-  --text:#000000;
-  --border:#000000;
+  --bg: #9f9797;
+  --panel: #ffffff;
+  --text: #000;
+  --red: #e11d2e;
+  --border: #000;
 }
 
-body{ background:var(--bg); color:var(--text); }
-.rlo-page{ padding-top:14px; }
+body{background: var(--bg) !important;}
+.rlo-page{background: var(--bg) !important; padding-bottom: 24px;}
 
 .rlo-navbar{
-  display:flex; align-items:center; justify-content:space-between;
-  gap:12px; padding:10px 14px; margin-bottom:12px;
-  background:var(--panel);
-  border:2px solid var(--border);
-  border-radius:18px;
+  background: #fff;
+  border-bottom: 2px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  padding: 10px 16px;
 }
-.logo-wrap img{ height:38px; width:auto; }
-.rlo-title{ font-weight:800; font-size:18px; line-height:1.1; }
-.rlo-title span{ color:var(--red); }
-.rlo-subtitle{ font-size:12px; opacity:0.85; }
 
-.rlo-actions{ display:flex; gap:8px; }
+.logo-wrap img{height:38px; width:38px; border-radius: 10px; border:2px solid #000;}
+.rlo-brand{display:flex; flex-direction:column; gap:2px;}
+.rlo-title{font-weight:800; color: var(--red); font-size: 20px; line-height: 1;}
+.rlo-subtitle{font-size: 12px; opacity: .7;}
+
+.rlo-actions{display:flex; gap:10px;}
 .rlo-action{
-  display:inline-block; padding:8px 12px; text-decoration:none;
-  background:var(--panel); color:var(--text);
-  border:2px solid var(--border); border-radius:999px;
-  font-weight:700; font-size:13px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid #000;
+  text-decoration:none;
+  color:#000;
+  font-weight:700;
+  background:#fff;
 }
-.rlo-bmc{ background:#FFDD00; }
-.rlo-ig{ background:var(--panel); }
-
-.box{
-  background:var(--panel);
-  border:2px solid var(--border);
-  border-radius:18px;
-  padding:12px;
-}
-
-.rlo-tabs-parent{ margin-top:10px; }
-.rlo-tabs{ background:transparent; }
+.rlo-bmc{background:#FFDD00;}
+.rlo-tabs-parent{margin-top: 10px;}
+.rlo-tabs{border:0 !important;}
 .rlo-tab{
-  border:2px solid var(--border) !important;
-  border-radius:999px !important;
-  padding:8px 14px !important;
-  margin-right:8px !important;
-  background:var(--panel) !important;
-  font-weight:800 !important;
+  border: 2px solid #000 !important;
+  border-radius: 999px !important;
+  padding: 10px 18px !important;
+  margin-right: 10px !important;
+  background: #fff !important;
+  font-weight: 800 !important;
 }
 .rlo-tab--selected{
-  background:var(--red) !important;
-  color:#fff !important;
+  background: #000 !important;
+  color: #fff !important;
+}
+
+.box{
+  background: var(--panel);
+  border: 2px solid #000;
+  border-radius: 18px;
+  padding: 12px;
 }
