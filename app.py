@@ -1,4 +1,5 @@
-import os, warnings, logging, traceback, glob
+
+import os, warnings, logging, traceback
 warnings.filterwarnings("ignore")
 logging.getLogger("fastf1").setLevel(logging.WARNING)
 
@@ -64,8 +65,8 @@ TEAM_COLORS = {
     'Racing Bulls':  '#6692FF',
     'Sauber':        '#52E252',
     'Haas':          '#B6BABD',
-    'Cadillac':      '#000000'
-
+    'Cadillac':      '#7a7a7a',  # grey
+    'Audi':          '#b0b0b0',  # silver-ish
 }
 
 # Map many possible FastF1 team strings to a canonical key in TEAM_COLORS
@@ -79,7 +80,7 @@ TEAM_ALIASES = {
     'racing bulls': 'Racing Bulls',
     'visa cash app rb': 'Racing Bulls',
     'vcarb': 'Racing Bulls',
-    'rb': 'Racing Bulls',   # keep last as a catch-all
+    'rb': 'Racing Bulls',
 
     'ferrari': 'Ferrari',
     'scuderia ferrari': 'Ferrari',
@@ -97,23 +98,23 @@ TEAM_ALIASES = {
     'williams': 'Williams',
     'williams racing': 'Williams',
 
-    # Sauber / Kick / Stake / Audi (bucketed for 2025–2026)
+    # Sauber / Kick / Stake / Audi
     'sauber': 'Sauber',
     'kick sauber': 'Sauber',
     'stake': 'Sauber',
     'stake f1': 'Sauber',
-    'audi': 'Sauber',
+
+    'audi': 'Audi',
 
     'haas': 'Haas',
     'haas f1': 'Haas',
 
-    # Cadillac / GM (2026+)
+    # Cadillac / GM
     'cadillac': 'Cadillac',
     'gm cadillac': 'Cadillac',
     'cadillac f1': 'Cadillac',
     'cadillac f1 team': 'Cadillac',
-    'andretti': 'Cadillac',          # por si FastF1 lo etiqueta así en algún punto
-
+    'andretti': 'Cadillac',
 }
 
 DRIVER_TEAM_OVERRIDE = {
@@ -179,7 +180,7 @@ def is_race(ses):
 # ---------- Live Schedule & Options ----------
 @lru_cache(maxsize=8)
 def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
-    # IMPORTANT: include testing in schedule
+    # include testing in schedule
     df = ff1.get_event_schedule(year, include_testing=True).copy()
     df['EventDate'] = pd.to_datetime(df['EventDate'])
     df['EventFormat'] = df['EventFormat'].astype(str).str.lower()
@@ -189,7 +190,6 @@ def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
 def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
 
-    # determine test_number by chronological order among testing events
     testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
     test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
 
@@ -200,16 +200,11 @@ def build_gp_options(year:int):
         name = str(r.EventName)
 
         if fmt == "testing":
-            test_number = test_dates.index(str(date)) + 1
-            opts.append({
-                "label": f"Pre-Season Testing #{test_number} ({date})",
-                "value": f"TEST|{test_number}"
-            })
+            # derive test_number from date order
+            test_number = test_dates.index(str(date)) + 1 if str(date) in test_dates else 1
+            opts.append({"label": f"Pre-Season Testing #{test_number} ({date})", "value": f"TEST|{test_number}"})
         else:
-            opts.append({
-                "label": f"R{int(r.RoundNumber)} — {name} ({date})",
-                "value": f"GP|{name}"
-            })
+            opts.append({"label": f"R{int(r.RoundNumber)} — {name} ({date})", "value": f"GP|{name}"})
     return opts
 
 def default_event_value(year:int):
@@ -218,14 +213,12 @@ def default_event_value(year:int):
     past = df[df['EventDate'] <= today].sort_values('EventDate')
     if past.empty:
         return None
-
     last = past.iloc[-1]
     if str(last['EventFormat']).lower() == 'testing':
         testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
         test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
-        test_number = test_dates.index(str(last['EventDate'].date())) + 1
+        test_number = test_dates.index(str(last['EventDate'].date())) + 1 if str(last['EventDate'].date()) in test_dates else 1
         return f"TEST|{test_number}"
-
     return f"GP|{str(last['EventName'])}"
 
 SESSION_OPTIONS = [
@@ -257,7 +250,6 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
     """
     event_value = str(event_value)
     sess_code = str(sess_code).upper()
-
     kind, payload = event_value.split("|", 1)
 
     if kind == "TEST":
@@ -267,7 +259,6 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
         ses.load(laps=True, telemetry=False, weather=False, messages=False)
         return ses
 
-    # GP normal
     event_name = payload
     try:
         ses = ff1.get_session(int(year), event_name, sess_code)
@@ -291,7 +282,6 @@ def driver_team_color_map(ses):
     except Exception:
         year = None
 
-    # Normalize team per driver if present
     laps = laps.dropna(subset=['Driver'])
     team_series = None
     if 'Team' in laps.columns and laps['Team'].notna().any():
@@ -299,7 +289,6 @@ def driver_team_color_map(ses):
             lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
         ).apply(canonical_team)
 
-    # Build final map with overrides
     out = {}
     drivers = laps['Driver'].dropna().unique().tolist()
     for drv in drivers:
@@ -307,8 +296,14 @@ def driver_team_color_map(ses):
         team = forced or (team_series.get(drv) if team_series is not None and drv in team_series.index else None)
         team = canonical_team(team) if isinstance(team, str) else (forced or "")
         out[drv] = TEAM_COLORS.get(team, '#cccccc')
-
     return out
+
+def pace_df(ses):
+    laps = ses.laps.copy().dropna(subset=['LapTime'])
+    if laps.empty: return pd.DataFrame()
+    laps['LapSeconds'] = laps['LapTime'].dt.total_seconds().astype(float)
+    laps['LapStr'] = laps['LapSeconds'].apply(s_to_mssmmm)
+    return laps[['Driver','LapNumber','LapSeconds','LapStr']]
 
 def gap_to_leader_df(ses):
     laps = ses.laps.copy().dropna(subset=['LapTime'])
@@ -346,13 +341,6 @@ def tyre_stints_df(ses):
     agg['Laps'] = agg['LapEnd'] - agg['LapStart'] + 1
     return agg.reset_index().sort_values(['Driver','Stint'])
 
-def pace_df(ses):
-    laps = ses.laps.copy().dropna(subset=['LapTime'])
-    if laps.empty: return pd.DataFrame()
-    laps['LapSeconds'] = laps['LapTime'].dt.total_seconds().astype(float)
-    laps['LapStr'] = laps['LapSeconds'].apply(s_to_mssmmm)
-    return laps[['Driver','LapNumber','LapSeconds','LapStr']]
-
 def sector_records_df(ses):
     laps = ses.laps.copy(); out=[]
     for i,c in enumerate(['Sector1Time','Sector2Time','Sector3Time'], start=1):
@@ -369,20 +357,106 @@ def speed_records_df(ses):
     if cols:
         grp = laps.groupby('Driver', dropna=False)[cols].max().reset_index()
         return grp.rename(columns={'SpeedI1':'I1 (km/h)','SpeedI2':'I2 (km/h)','SpeedFL':'Finish (km/h)','SpeedST':'Trap (km/h)'})
-    best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].dropna(subset=['LapTime'])
-    rows=[]
-    for _, r in best.iterrows():
+    return pd.DataFrame()
+
+# ---------- Telemetry helpers ----------
+def _lap_pick_fastest(ses, driver: str):
+    laps = ses.laps.pick_driver(driver).dropna(subset=['LapTime'])
+    if laps.empty:
+        return None
+    try:
+        lap = laps.pick_fastest()
+    except Exception:
+        lap = laps.sort_values('LapTime').iloc[0]
+    return lap
+
+@lru_cache(maxsize=128)
+def load_fastest_lap_car_data(year:int, event_value:str, sess_code:str, driver:str):
+    """
+    Cached: returns dataframe with Distance + telemetry channels for the driver's fastest lap.
+    """
+    ses = load_session_laps(year, event_value, sess_code)
+    lap = _lap_pick_fastest(ses, driver)
+    if lap is None:
+        return pd.DataFrame()
+
+    # Car data tends to include Speed/RPM/nGear/Throttle/Brake/DRS (varies by session/provider)
+    try:
+        car = lap.get_car_data().add_distance()
+    except Exception:
+        car = pd.DataFrame()
+
+    # Some channels may exist only in telemetry
+    try:
+        tel = lap.get_telemetry().add_distance()
+    except Exception:
+        tel = pd.DataFrame()
+
+    if car.empty and tel.empty:
+        return pd.DataFrame()
+
+    # Merge on time if possible; else prefer car
+    df = car.copy() if not car.empty else tel.copy()
+
+    # Ensure Distance
+    if 'Distance' not in df.columns:
+        # try to recover from other
+        other = tel if df is car else car
+        if isinstance(other, pd.DataFrame) and 'Distance' in other.columns:
+            df['Distance'] = other['Distance']
+
+    # Bring missing columns from the other df
+    other = tel if df is car else car
+    for c in ['Speed','Throttle','Brake','nGear','RPM','DRS','Time']:
+        if c not in df.columns and isinstance(other, pd.DataFrame) and c in other.columns:
+            df[c] = other[c]
+
+    # Normalize Time to seconds from start for later delta computations
+    if 'Time' in df.columns:
         try:
-            vmax = float(r.get_car_data().add_distance()['Speed'].max())
+            df['Time_s'] = (df['Time'] - df['Time'].iloc[0]).dt.total_seconds()
         except Exception:
-            vmax = np.nan
-        rows.append({'Driver': r['Driver'], 'Trap (km/h)': vmax})
-    return pd.DataFrame(rows)
+            df['Time_s'] = np.nan
+
+    return df
+
+def compute_delta_trace(df_a: pd.DataFrame, df_b: pd.DataFrame, n=600):
+    """
+    Interpolate both laps on a common distance grid and compute delta time (B - A).
+    """
+    if df_a is None or df_b is None or df_a.empty or df_b.empty:
+        return pd.DataFrame()
+
+    # Need Distance + Time_s
+    if 'Distance' not in df_a.columns or 'Time_s' not in df_a.columns: return pd.DataFrame()
+    if 'Distance' not in df_b.columns or 'Time_s' not in df_b.columns: return pd.DataFrame()
+
+    a = df_a.dropna(subset=['Distance','Time_s']).sort_values('Distance')
+    b = df_b.dropna(subset=['Distance','Time_s']).sort_values('Distance')
+    if a.empty or b.empty:
+        return pd.DataFrame()
+
+    max_d = float(min(a['Distance'].max(), b['Distance'].max()))
+    if not np.isfinite(max_d) or max_d <= 0:
+        return pd.DataFrame()
+
+    x = np.linspace(0.0, max_d, n)
+
+    # de-duplicate distances for interp safety
+    a = a.drop_duplicates('Distance')
+    b = b.drop_duplicates('Distance')
+
+    ta = np.interp(x, a['Distance'].to_numpy(), a['Time_s'].to_numpy())
+    tb = np.interp(x, b['Distance'].to_numpy(), b['Time_s'].to_numpy())
+    delta = tb - ta
+
+    out = pd.DataFrame({'Distance': x, 'Delta_s': delta})
+    return out
 
 # ================= Dash =================
 external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
-app.title = SITE_TITLE  # browser tab title
+app.title = SITE_TITLE
 
 app.index_string = f"""<!DOCTYPE html>
 <html>
@@ -423,34 +497,27 @@ def header_controls():
     return dbc.Row([
         dbc.Col([
             dbc.Label("Year"),
-            dcc.Dropdown(
-                id='year-dd',
+            dcc.Dropdown(id='year-dd',
                 options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
-                value=y0,
-                clearable=False
-            ),
+                value=y0, clearable=False),
             html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
         ], md=3),
 
         dbc.Col([
-            dbc.Label("Grand Prix"),
-            dcc.Dropdown(
-                id='event-dd',
+            dbc.Label("Event"),
+            dcc.Dropdown(id='event-dd',
                 options=build_gp_options(y0),
                 value=default_event_value(y0),
                 clearable=False,
-                placeholder="Select event..."
-            )
+                placeholder="Select event...")
         ], md=6),
 
         dbc.Col([
             dbc.Label("Session"),
-            dcc.Dropdown(
-                id='session-dd',
+            dcc.Dropdown(id='session-dd',
                 options=SESSION_OPTIONS,
                 value='R',
-                clearable=False
-            )
+                clearable=False)
         ], md=3),
     ], className="g-2")
 
@@ -508,6 +575,56 @@ def tab_records():
 def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
+def tab_telemetry():
+    # Single-driver telemetry: use one dropdown and 6 stacked graphs
+    return html.Div([
+        html.Div(className="box", children=[
+            dbc.Row([
+                dbc.Col(html.H5("Lap Telemetry (fastest lap)", className="m-0"), md=4),
+                dbc.Col([
+                    dcc.Dropdown(id='telemetry-driver', multi=False, placeholder="Select driver", options=[], value=None)
+                ], md=8),
+            ], className="g-2 align-items-center"),
+        ]),
+        dbc.Row([
+            dbc.Col(dcc.Graph(id='g-speed-dist', figure=fig_empty("Speed vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+            dbc.Col(dcc.Graph(id='g-throttle-dist', figure=fig_empty("Throttle vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+        ], className="g-2 mt-1"),
+        dbc.Row([
+            dbc.Col(dcc.Graph(id='g-brake-dist', figure=fig_empty("Brake vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+            dbc.Col(dcc.Graph(id='g-gear-dist', figure=fig_empty("Gear vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+        ], className="g-2 mt-1"),
+        dbc.Row([
+            dbc.Col(dcc.Graph(id='g-rpm-dist', figure=fig_empty("RPM vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+            dbc.Col(dcc.Graph(id='g-drs-dist', figure=fig_empty("DRS usage vs Distance"),
+                              config={"displayModeBar": False, "scrollZoom": True}, style={"height":"360px"}), md=6),
+        ], className="g-2 mt-1"),
+    ])
+
+def tab_delta():
+    return html.Div([
+        html.Div(className="box", children=[
+            dbc.Row([
+                dbc.Col(html.H5("Delta time trace (fastest laps)", className="m-0"), md=4),
+                dbc.Col([
+                    dcc.Dropdown(id='delta-driver-a', multi=False, placeholder="Driver A", options=[], value=None)
+                ], md=4),
+                dbc.Col([
+                    dcc.Dropdown(id='delta-driver-b', multi=False, placeholder="Driver B", options=[], value=None)
+                ], md=4),
+            ], className="g-2 align-items-center"),
+        ]),
+        html.Div(className="box mt-2", children=[
+            dcc.Graph(id='g-delta', figure=fig_empty("Delta (B - A) vs Distance"),
+                      config={"displayModeBar": False, "scrollZoom": True}, style={"height":"420px"})
+        ])
+    ])
+
 app.layout = dbc.Container([
     header_controls(),
     dcc.Tabs(
@@ -521,6 +638,8 @@ app.layout = dbc.Container([
             dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Telemetry", value="telemetry", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Delta", value="delta", className="rlo-tab", selected_className="rlo-tab--selected"),
         ],
     ),
     html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
@@ -531,10 +650,17 @@ app.layout = dbc.Container([
 
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
-    return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
-            "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
+    return {
+        "evo": tab_evolution,
+        "tyres": tab_tyres,
+        "pace": tab_pace,
+        "records": tab_records,
+        "speeds": tab_speeds,
+        "telemetry": tab_telemetry,
+        "delta": tab_delta,
+    }.get(val, tab_evolution)()
 
-# NEW: Session dropdown changes depending on whether event is TEST or GP
+# Session dropdown changes depending on whether event is TEST or GP
 @app.callback(
     Output('session-dd','options'),
     Output('session-dd','value'),
@@ -544,13 +670,11 @@ def _render_tabs(val):
 def _event_changed_set_sessions(event_val, current):
     if not event_val:
         return SESSION_OPTIONS, 'R'
-
     kind = str(event_val).split("|", 1)[0]
     if kind == "TEST":
         valid = {o["value"] for o in TEST_SESSION_OPTIONS}
         new_val = current if current in valid else "T1"
         return TEST_SESSION_OPTIONS, new_val
-
     valid = {o["value"] for o in SESSION_OPTIONS}
     new_val = current if current in valid else "R"
     return SESSION_OPTIONS, new_val
@@ -577,7 +701,7 @@ def load_session_meta(year, event_value, sess_code):
         traceback.print_exc()
         return no_update, [], {}
 
-# ===== Populate ONLY mounted dropdowns (incl. when switching tabs) =====
+# ===== Populate ONLY mounted multi-driver dropdowns (graph boxes) =====
 @app.callback(
     Output({'role':'drv','chart':ALL}, 'options'),
     Output({'role':'drv','chart':ALL}, 'value'),
@@ -591,7 +715,18 @@ def fill_dropdowns(drivers, _children, ids):
     n = len(ids)
     return [opts]*n, [val]*n
 
-# ===== Year-driven GP list + guard against future-only seasons =====
+# ===== Populate single-driver controls for telemetry/delta =====
+@app.callback(
+    Output('telemetry-driver','options'),
+    Output('delta-driver-a','options'),
+    Output('delta-driver-b','options'),
+    Input('drivers-store','data'),
+)
+def fill_single_driver_controls(drivers):
+    opts = [{'label': d, 'value': d} for d in (drivers or [])]
+    return opts, opts, opts
+
+# ===== Year-driven event list =====
 @app.callback(
     Output('event-dd','options'),
     Output('event-dd','value'),
@@ -655,6 +790,8 @@ def chart_gap(data, selected, color_map):
 def chart_lapchart(data, selected, color_map):
     if not data: return fig_empty("(no data)")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
+    if 'Position' not in ses.laps.columns:
+        return fig_empty("Lapchart — position data not available")
     laps = ses.laps[['Driver','LapNumber','Position']].dropna()
     if selected: laps = laps[laps['Driver'].isin(selected)]
     if laps.empty: return fig_empty("Lapchart — no data")
@@ -804,51 +941,121 @@ def chart_speeds(data, selected):
     f.update_layout(yaxis_title="km/h")
     return polish(f)
 
+# ================= Telemetry graphs =================
+def _telemetry_fig(df, ycol: str, title: str, ytitle: str = ""):
+    if df is None or df.empty or 'Distance' not in df.columns or ycol not in df.columns:
+        return fig_empty(f"{title} — no data")
+    d = df.dropna(subset=['Distance', ycol]).sort_values('Distance')
+    if d.empty:
+        return fig_empty(f"{title} — no data")
+    f = go.Figure()
+    f.add_trace(go.Scatter(x=d['Distance'], y=d[ycol], mode='lines', name=ycol))
+    f.update_layout(title=title)
+    if ytitle:
+        f.update_yaxes(title=ytitle)
+    f.update_xaxes(title="Distance (m)")
+    return polish(f)
+
+@app.callback(
+    Output('g-speed-dist','figure'),
+    Output('g-throttle-dist','figure'),
+    Output('g-brake-dist','figure'),
+    Output('g-gear-dist','figure'),
+    Output('g-rpm-dist','figure'),
+    Output('g-drs-dist','figure'),
+    Input('store','data'),
+    Input('telemetry-driver','value')
+)
+def charts_telemetry(data, driver):
+    if not data or not driver:
+        return (fig_empty("Speed vs Distance"),
+                fig_empty("Throttle vs Distance"),
+                fig_empty("Brake vs Distance"),
+                fig_empty("Gear vs Distance"),
+                fig_empty("RPM vs Distance"),
+                fig_empty("DRS usage vs Distance"))
+
+    year = int(data.get('year', 2025))
+    ev = str(data['event'])
+    sess = str(data['sess'])
+
+    df = load_fastest_lap_car_data(year, ev, sess, str(driver))
+    # Speed
+    f_speed = _telemetry_fig(df, 'Speed', f"Speed vs Distance — {driver}", "km/h")
+    # Throttle: typically 0-100
+    f_thr = _telemetry_fig(df, 'Throttle', f"Throttle vs Distance — {driver}", "%")
+    # Brake: boolean or 0/1
+    f_brk = _telemetry_fig(df, 'Brake', f"Brake vs Distance — {driver}", "Brake")
+    # Gear
+    f_gear = _telemetry_fig(df, 'nGear', f"Gear vs Distance — {driver}", "Gear")
+    # RPM
+    f_rpm = _telemetry_fig(df, 'RPM', f"RPM vs Distance — {driver}", "RPM")
+
+    # DRS usage: show as step if possible
+    if df is None or df.empty or 'Distance' not in df.columns:
+        f_drs = fig_empty("DRS usage vs Distance — no data")
+    else:
+        col = 'DRS' if 'DRS' in df.columns else None
+        if col is None:
+            f_drs = fig_empty("DRS usage vs Distance — no data")
+        else:
+            d = df.dropna(subset=['Distance', col]).sort_values('Distance')
+            if d.empty:
+                f_drs = fig_empty("DRS usage vs Distance — no data")
+            else:
+                y = d[col]
+                # normalize to 0/1 where possible
+                try:
+                    yv = y.astype(float)
+                    yn = (yv > 0).astype(int)
+                except Exception:
+                    yn = y
+                f_drs = go.Figure()
+                f_drs.add_trace(go.Scatter(x=d['Distance'], y=yn, mode='lines', line_shape='hv', name='DRS'))
+                f_drs.update_layout(title=f"DRS usage vs Distance — {driver}")
+                f_drs.update_yaxes(title="DRS (0/1)", dtick=1, range=[-0.1, 1.1])
+                f_drs.update_xaxes(title="Distance (m)")
+                f_drs = polish(f_drs)
+
+    return f_speed, f_thr, f_brk, f_gear, f_rpm, f_drs
+
+# ================= Delta graph =================
+@app.callback(
+    Output('g-delta','figure'),
+    Input('store','data'),
+    Input('delta-driver-a','value'),
+    Input('delta-driver-b','value')
+)
+def chart_delta(data, drv_a, drv_b):
+    if not data or not drv_a or not drv_b or drv_a == drv_b:
+        return fig_empty("Delta (B - A) vs Distance")
+
+    year = int(data.get('year', 2025))
+    ev = str(data['event'])
+    sess = str(data['sess'])
+
+    df_a = load_fastest_lap_car_data(year, ev, sess, str(drv_a))
+    df_b = load_fastest_lap_car_data(year, ev, sess, str(drv_b))
+
+    d = compute_delta_trace(df_a, df_b, n=700)
+    if d.empty:
+        return fig_empty("Delta (B - A) vs Distance — no data")
+
+    f = go.Figure()
+    f.add_trace(go.Scatter(x=d['Distance'], y=d['Delta_s'], mode='lines', name=f"{drv_b} - {drv_a}"))
+    f.update_layout(title=f"Delta time vs Distance (fastest laps): {drv_b} - {drv_a}")
+    f.update_xaxes(title="Distance (m)")
+    f.update_yaxes(title="Delta (s)", tickformat=".3f")
+    return polish(f)
+
 # ================= Run =================
 server = app.server
+
 from flask import jsonify
 
 @server.route("/health", methods=["GET"])
 def health():
     return jsonify(status="ok")
-
-@server.route("/warmup", methods=["GET"])
-def warmup():
-    # Warmup schedule + try loading last past session/test for allowed years
-    try:
-        now = pd.Timestamp.utcnow().tz_localize(None)
-        for y in YEARS_ALLOWED:
-            try:
-                df = get_schedule_df(y, _utc_today_token())
-                past = df[df["EventDate"] <= now].sort_values("EventDate")
-                if past.empty:
-                    continue
-                last = past.iloc[-1]
-
-                if str(last["EventFormat"]).lower() == "testing":
-                    # pick test_number by date order
-                    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-                    test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
-                    test_number = test_dates.index(str(last["EventDate"].date())) + 1
-                    try:
-                        s = ff1.get_testing_session(y, test_number, 1)
-                        s.load(telemetry=False, weather=False, messages=False)
-                    except Exception:
-                        pass
-                else:
-                    gp = str(last["EventName"])
-                    for sess_name in ("R", "Q"):
-                        try:
-                            s = ff1.get_session(y, gp, sess_name)
-                            s.load(telemetry=False, weather=False, messages=False)
-                            break
-                        except Exception:
-                            continue
-            except Exception:
-                continue
-        return jsonify(status="warmed")
-    except Exception as e:
-        return jsonify(status="error", detail=str(e)), 500
 
 if __name__ == "__main__":
     app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
