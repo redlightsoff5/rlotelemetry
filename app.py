@@ -199,10 +199,13 @@ def build_gp_options(year:int):
         date = r.EventDate.date()
         name = str(r.EventName)
 
-        if fmt == "testing":
-            # derive test_number from date order
-            test_number = test_dates.index(str(date)) + 1 if str(date) in test_dates else 1
-            opts.append({"label": f"Pre-Season Testing #{test_number} ({date})", "value": f"TEST|{test_number}"})
+         if fmt == "testing":
+            test_number = test_dates.index(str(date)) + 1
+            opts.append({
+                "label": f"Pre-Season Testing #{test_number} ({date})",
+                "value": f"TEST|{test_number}"
+            })
+
         else:
             opts.append({"label": f"R{int(r.RoundNumber)} — {name} ({date})", "value": f"GP|{name}"})
     return opts
@@ -230,37 +233,44 @@ SESSION_OPTIONS = [
     {"label": "Sprint", "value": "SR"},
     {"label": "Race", "value": "R"},
 
-    # ---- TESTING ----
-    {"label": "Day 1", "value": "Day 1"},
-    {"label": "Day 2", "value": "Day 2"},
-    {"label": "Day 3", "value": "Day 3"},
+TEST_SESSION_OPTIONS = [
+    {"label": "Day 1", "value": "T1"},
+    {"label": "Day 2", "value": "T2"},
+    {"label": "Day 3", "value": "T3"},
 ]
 
 # ---------- Loaders ----------
-@lru_cache(maxsize=32)
-def load_session_laps(year:int, event_name:str, sess_code:str):
+@lru_cache(maxsize=64)
+def load_session_laps(year:int, event_value:str, sess_code:str):
+    """
+    event_value:
+      - 'GP|<EventName>'
+      - 'TEST|<test_number>'  (1..)
+    sess_code:
+      - GP: FP1/FP2/FP3/SQ/Q/SR/R
+      - TEST: T1/T2/T3
+    """
+    event_value = str(event_value)
+    sess_code = str(sess_code).upper()
 
-    # --- TESTING SUPPORT ---
-    # Testing sessions come as "Day 1", "Day 2", "Day 3"
-    if isinstance(sess_code, str) and sess_code.lower().startswith("day"):
-        try:
-            # convert "Day 1" -> 1
-            day_num = int(sess_code.split()[-1])
-            ses = ff1.get_testing_session(year, day_num)
-            ses.load(laps=True, telemetry=False, weather=False, messages=False)
-            return ses
-        except Exception:
-            raise
+    kind, payload = event_value.split("|", 1)
 
-    # --- NORMAL WEEKEND ---
+    if kind == "TEST":
+        test_number = int(payload)
+        day_number = int(sess_code.replace("T", ""))  # T1->1
+        ses = ff1.get_testing_session(int(year), test_number, day_number)
+        ses.load(laps=True, telemetry=False, weather=False, messages=False)
+        return ses
+
+    # GP normal
+    event_name = payload
     try:
-        ses = ff1.get_session(int(year), event_name, str(sess_code))
+        ses = ff1.get_session(int(year), event_name, sess_code)
     except Exception:
-        if str(sess_code).upper() == "SQ":
+        if sess_code == "SQ":
             ses = ff1.get_session(int(year), event_name, "SS")
         else:
             raise
-
     ses.load(laps=True, telemetry=False, weather=False, messages=False)
     return ses
 
