@@ -184,37 +184,249 @@ def is_race(ses):
     n = (getattr(ses, "name", "") or "").upper()
     return t == "R" or "RACE" in n
 
-@lru_cache(maxsize=64)
-def load_session_laps(year:int, event_value:str, sess_code):
-    """Load either a GP session or a testing day session.
-    - GP: event_value is encoded 'GP|...' or raw EventName
-    - TEST: event_value is 'TEST|<n>' and sess_code is day number (1..3)
-    """
-    info = parse_event_value(event_value)
-    if not info:
-        raise ValueError("No event selected")
+@lru_cache(maxsize=8)
+def get_schedule_df(year: int, date_token: str) -> pd.DataFrame:
+    df = ff1.get_event_schedule(year, include_testing=True).copy()
+    df["EventDate"] = pd.to_datetime(df["EventDate"])
+    df["EventFormat"] = df["EventFormat"].astype(str).str.lower()
+    return df[["RoundNumber", "EventName", "EventFormat", "EventDate"]].sort_values(
+        ["EventDate", "RoundNumber"]
+    ).reset_index(drop=True)
 
-    if info.get("type") == "test":
-        test_number = int(info.get("test", 1))
-        day = int(sess_code) if sess_code is not None else 1
-        ses = ff1.get_testing_session(int(year), test_number, day)
-        ses.load(laps=True, telemetry=False, weather=False, messages=False)
+def build_gp_options(year: int):
+    df = get_schedule_df(year, _utc_today_token())
+
+    # FastF1 may label testing as "testing" or "pre-season testing" etc.
+    testing_df = (df[df["EventFormat"].astype(str).str.lower().str.contains("test", na=False)]
+        .sort_values("EventDate").reset_index(drop=True))
+
+    # stable numbering: 1..N by chronological order (EventDate + EventName)
+    test_keys = {(r.EventDate.date(), str(r.EventName)): i + 1 for i, r in testing_df.iterrows()}
+
+    opts = []
+    for _, r in df.iterrows():
+        fmt = str(r.EventFormat).lower()
+        date = r.EventDate.date()
+        name = str(r.EventName)
+
+        if "test" in fmt:
+            test_number = test_keys.get((date, name), 1)
+            opts.append({"label": f"Test de Pretemporada #{test_number} ({date})", "value": f"TEST|{test_number}"})
+        else:
+            opts.append({"label": f"R{int(r.RoundNumber)} — {name} ({date})",
+                         "value": f"GP|round={int(r.RoundNumber)}|name={name}"})
+    return opts
+
+def default_event_value(year: int):
+    df = get_schedule_df(year, _utc_today_token())
+    today = pd.Timestamp.utcnow().tz_localize(None)
+    past = df[df["EventDate"] <= today].sort_values("EventDate")
+    if past.empty:
+        return None
+
+    last = past.iloc[-1]
+    fmt = str(last.get("EventFormat","")).lower()
+
+    if "test" in fmt:
+        testing_df = (df[df["EventFormat"].astype(str).str.lower().str.contains("test", na=False)]
+            .sort_values("EventDate").reset_index(drop=True))
+        test_keys = {(r.EventDate.date(), str(r.EventName)): i + 1 for i, r in testing_df.iterrows()}
+        test_number = test_keys.get((last["EventDate"].date(), str(last["EventName"])), 1)
+        return f"TEST|{test_number}"
+
+    return f"GP|round={int(last['RoundNumber'])}|name={str(last['EventName'])}"
+    last = past.iloc[-1]
+    if str(last["EventFormat"]).lower() == "testing":
+        testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+        test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
+        test_number = test_dates.index(str(last["EventDate"].date())) + 1
+        return f"TEST|{test_number}"
+    return f"GP|round={int(last['RoundNumber'])}|name={str(last['EventName'])}"
+
+SESSION_OPTIONS = [
+    {"label": "FP1", "value": "FP1"},
+    {"label": "FP2", "value": "FP2"},
+    {"label": "FP3", "value": "FP3"},
+    {"label": "Sprint Qualifying", "value": "SQ"},
+    {"label": "Qualifying", "value": "Q"},
+    {"label": "Sprint", "value": "SR"},
+    {"label": "Race", "value": "R"},
+]
+TEST_SESSION_OPTIONS = [
+    {"label": "Día 1", "value": "T1"},
+    {"label": "Día 2", "value": "T2"},
+    {"label": "Día 3", "value": "T3"},
+]
+
+@lru_cache(maxsize=64)
+def load_session(year: int, event_value: str, sess_code: str, telemetry: bool = False):
+    event_value = str(event_value)
+    sess_code = str(sess_code).upper()
+    kind, payload = event_value.split("|", 1)
+
+    if kind == "TEST":
+        test_number = int(payload)
+        day_number = int(sess_code.replace("T", ""))
+        ses = ff1.get_testing_session(int(year), test_number, day_number)
+        ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
         return ses
 
-    # GP branch
-    event_name = info.get("name") or str(event_value)
-    code = str(sess_code)
-
+    name = payload.split("|name=", 1)[-1]
     try:
-        ses = ff1.get_session(int(year), event_name, code)
+        ses = ff1.get_session(int(year), name, sess_code)
     except Exception:
-        # Back-compat: Sprint Shootout naming
-        if str(code).upper() == "SQ":
-            ses = ff1.get_session(int(year), event_name, "SS")
+        if sess_code == "SQ":
+            ses = ff1.get_session(int(year), name, "SS")
         else:
             raise
-    ses.load(laps=True, telemetry=False, weather=False, messages=False)
-    return ses.laps.loc[lap.name]
+    ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
+    return ses
+
+@lru_cache(maxsize=64)
+def load_session_laps(year: int, event_value: str, sess_code: str):
+    return load_session(year, event_value, sess_code, telemetry=False)
+
+def session_year(ses) -> int:
+    try:
+        return int(getattr(getattr(ses, "event", None), "year", None) or 0)
+    except Exception:
+        return 0
+
+def driver_team_color_map(ses):
+    laps = ses.laps[["Driver", "Team"]].copy() if hasattr(ses, "laps") else pd.DataFrame()
+    if laps.empty:
+        return {}
+    year = session_year(ses)
+    palette = TEAM_COLORS_2026 if year == 2026 else TEAM_COLORS_2025
+
+    laps = laps.dropna(subset=["Driver"])
+    team_series = None
+    if "Team" in laps.columns and laps["Team"].notna().any():
+        team_series = laps.dropna(subset=["Team"]).groupby("Driver")["Team"].agg(
+            lambda s: s.mode().iloc[0] if not s.mode().empty else s.iloc[-1]
+        ).apply(canonical_team)
+
+    out = {}
+    for drv in sorted(laps["Driver"].dropna().unique().tolist()):
+        forced = DRIVER_TEAM_OVERRIDE.get((year, drv))
+        team = forced or (team_series.get(drv) if team_series is not None and drv in team_series.index else None)
+        team = canonical_team(team) if isinstance(team, str) else (forced or "")
+        out[drv] = palette.get(team, "#cccccc")
+    return out
+
+def set_trace_color(fig, name_to_color):
+    for tr in fig.data:
+        c = (name_to_color or {}).get(getattr(tr, "name", None))
+        if c:
+            tr.update(line=dict(color=c), marker=dict(color=c))
+    return fig
+
+def laps_df(ses):
+    laps = ses.laps.copy()
+    return pd.DataFrame() if laps is None or laps.empty else laps
+
+def pace_df(ses):
+    laps = laps_df(ses).dropna(subset=["LapTime"])
+    if laps.empty:
+        return pd.DataFrame()
+    laps["LapSeconds"] = laps["LapTime"].dt.total_seconds().astype(float)
+    laps["LapStr"] = laps["LapSeconds"].apply(s_to_mssmmm)
+    if "TyreLife" in laps.columns:
+        laps["TyreLife"] = pd.to_numeric(laps["TyreLife"], errors="coerce")
+    return laps
+
+def gap_to_leader_df(ses):
+    laps = pace_df(ses)
+    if laps.empty:
+        return pd.DataFrame()
+    if is_race(ses):
+        laps = laps.dropna(subset=["LapNumber", "Driver", "LapSeconds"])
+        laps["Cum"] = laps.groupby("Driver", dropna=False)["LapSeconds"].cumsum()
+        lead = laps.groupby("LapNumber", dropna=False)["Cum"].min().rename("Lead").reset_index()
+        d = laps.merge(lead, on="LapNumber", how="left")
+        d["Gap_s"] = d["Cum"] - d["Lead"]
+        d["GapStr"] = d["Gap_s"].apply(s_to_mssmmm)
+        return d[["Driver", "LapNumber", "Gap_s", "GapStr"]]
+    best = laps.groupby("Driver", dropna=False)["LapTime"].min().rename("Best").reset_index()
+    gbest = best["Best"].min()
+    best["Gap_s"] = (best["Best"] - gbest).dt.total_seconds()
+    best["GapStr"] = best["Gap_s"].apply(s_to_mssmmm)
+    best["LapNumber"] = 1
+    return best[["Driver", "LapNumber", "Gap_s", "GapStr"]]
+
+def tyre_stints_df(ses):
+    laps = laps_df(ses)
+    if laps.empty or "Compound" not in laps.columns or "Stint" not in laps.columns:
+        return pd.DataFrame()
+    laps = laps.copy()
+    laps["Compound"] = laps["Compound"].astype(str).str.upper()
+    agg = (laps.groupby(["Driver", "Stint", "Compound"], dropna=False)
+           .agg(LapStart=("LapNumber", "min"), LapEnd=("LapNumber", "max")))
+    agg["Laps"] = agg["LapEnd"] - agg["LapStart"] + 1
+    return agg.reset_index().sort_values(["Driver", "Stint"])
+
+def compound_usage_df(ses):
+    laps = laps_df(ses)
+    if laps.empty or "Compound" not in laps.columns:
+        return pd.DataFrame()
+    df = laps.dropna(subset=["Driver"]).copy()
+    df["Compound"] = df["Compound"].astype(str).str.upper()
+    return df.groupby(["Driver", "Compound"], dropna=False).size().reset_index(name="Laps")
+
+def sector_times_long_df(ses):
+    laps = laps_df(ses)
+    cols = ["Sector1Time", "Sector2Time", "Sector3Time"]
+    if laps.empty or not any(c in laps.columns for c in cols):
+        return pd.DataFrame()
+    out = []
+    for i, c in enumerate(cols, start=1):
+        if c in laps.columns:
+            tmp = laps[["Driver", "LapNumber", c]].dropna(subset=[c]).copy()
+            tmp["Sector"] = f"S{i}"
+            tmp["Time_s"] = tmp[c].dt.total_seconds()
+            out.append(tmp[["Driver", "LapNumber", "Sector", "Time_s"]])
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+
+def pit_laps_df(ses):
+    laps = laps_df(ses)
+    if laps.empty:
+        return pd.DataFrame()
+    df = laps[["Driver", "LapNumber"]].copy()
+    df["PitInTime"] = laps["PitInTime"] if "PitInTime" in laps.columns else pd.NaT
+    df["PitOutTime"] = laps["PitOutTime"] if "PitOutTime" in laps.columns else pd.NaT
+    if df["PitInTime"].notna().any() or df["PitOutTime"].notna().any():
+        return df[df["PitInTime"].notna() | df["PitOutTime"].notna()].dropna(subset=["LapNumber"])
+    if "Stint" in laps.columns:
+        tmp = laps.dropna(subset=["Driver", "Stint", "LapNumber"]).copy().sort_values(["Driver", "LapNumber"])
+        tmp["StintPrev"] = tmp.groupby("Driver")["Stint"].shift(1)
+        return tmp[(tmp["StintPrev"].notna()) & (tmp["Stint"] != tmp["StintPrev"])][["Driver", "LapNumber"]]
+    return pd.DataFrame()
+
+def best_laps_df(ses):
+    laps = pace_df(ses)
+    if laps.empty:
+        return pd.DataFrame()
+    best = laps.loc[laps.groupby("Driver")["LapTime"].idxmin()].copy()
+    best["Best_s"] = best["LapTime"].dt.total_seconds()
+    best["BestStr"] = best["Best_s"].apply(s_to_mssmmm)
+    return best.sort_values("Best_s")
+
+def speed_metrics_df(ses):
+    laps = laps_df(ses)
+    cols = [c for c in ["SpeedI1", "SpeedI2", "SpeedFL", "SpeedST"] if c in laps.columns]
+    if not cols:
+        return pd.DataFrame()
+    grp = laps.groupby("Driver", dropna=False)[cols].max().reset_index()
+    return grp.rename(columns={"SpeedI1": "I1 (km/h)", "SpeedI2": "I2 (km/h)", "SpeedFL": "Finish (km/h)", "SpeedST": "Trap (km/h)"})
+
+def _lap_for_driver(ses, driver: str, pick="best"):
+    laps = pace_df(ses)
+    laps = laps[laps["Driver"] == driver].dropna(subset=["LapTime"])
+    if laps.empty:
+        return None
+    lap = laps.loc[laps["LapTime"].idxmin()] if pick == "best" else laps.iloc[-1]
+    try:
+        return ses.laps.loc[lap.name]
     except Exception:
         return None
 
@@ -838,22 +1050,4 @@ def health():
     return jsonify(status="ok")
 
 if __name__ == "__main__":
-    app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))@app.callback(
-    Output('session-dd','options'),
-    Output('session-dd','value'),
-    Input('event-dd','value'),
-    State('session-dd','value')
-)
-def _event_changed_session_options(event_val, current):
-    info = parse_event_value(event_val)
-    if not info:
-        return SESSION_OPTIONS, 'R'
-    if info.get('type') == 'test':
-        # Testing days: 1..3
-        val = current if current in (1,2,3) else 1
-        return TEST_SESSION_OPTIONS, val
-    # GP sessions
-    val = current if current in [o['value'] for o in SESSION_OPTIONS] else 'R'
-    return SESSION_OPTIONS, val
-
-
+    app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
