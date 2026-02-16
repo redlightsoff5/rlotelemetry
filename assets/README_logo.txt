@@ -1,1 +1,1 @@
-Put your logo file at assets/logo.png
+Put your logo here as assets/logo.png
