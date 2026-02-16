@@ -437,13 +437,13 @@ external_stylesheets = [dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 app.title = SITE_TITLE
 
-INDEX_HTML = """<!DOCTYPE html>
+app.index_string = f"""<!DOCTYPE html>
 <html>
 <head>
-  {%metas%}
-  <title>{title}</title>
-  {%favicon%}
-  {%css%}
+  {{%metas%}}
+  <title>{SITE_TITLE}</title>
+  {{%favicon%}}
+  {{%css%}}
 </head>
 <body>
   <div class="rlo-navbar">
@@ -455,21 +455,21 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="rlo-subtitle">by @redlightsoff5</div>
     </div>
     <div class="rlo-actions">
-      <a class="rlo-action rlo-ig" href="{ig}" target="_blank" rel="noopener noreferrer">Instagram</a>
-      <a class="rlo-action rlo-bmc" href="{bmc}" target="_blank" rel="noopener noreferrer">Support</a>
+      <a class="rlo-action rlo-ig" href="{IG_URL}" target="_blank" rel="noopener noreferrer">Instagram</a>
+      <a class="rlo-action rlo-bmc" href="{BMC_URL}" target="_blank" rel="noopener noreferrer">Support</a>
     </div>
   </div>
-  {%app_entry%}
+
+  {{%app_entry%}}
+
   <footer>
-    {%config%}
-    {%scripts%}
-    {%renderer%}
+    {{%config%}}
+    {{%scripts%}}
+    {{%renderer%}}
   </footer>
 </body>
 </html>
-""".format(title=SITE_TITLE, ig=IG_URL, bmc=BMC_URL)
-
-app.index_string = INDEX_HTML
+"""
 
 def header_controls():
     y0 = default_year_value()
