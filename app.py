@@ -222,51 +222,45 @@ def default_event_value(year:int):
     return f"GP|{str(last['EventName'])}"
 
 SESSION_OPTIONS = [
-    {"label": "FP1",               "value": "FP1"},
-    {"label": "FP2",               "value": "FP2"},
-    {"label": "FP3",               "value": "FP3"},
+    {"label": "FP1", "value": "FP1"},
+    {"label": "FP2", "value": "FP2"},
+    {"label": "FP3", "value": "FP3"},
     {"label": "Sprint Qualifying", "value": "SQ"},
-    {"label": "Qualifying",        "value": "Q"},
-    {"label": "Sprint",            "value": "SR"},
-    {"label": "Race",              "value": "R"},
-]
+    {"label": "Qualifying", "value": "Q"},
+    {"label": "Sprint", "value": "SR"},
+    {"label": "Race", "value": "R"},
 
-TEST_SESSION_OPTIONS = [
-    {"label": "Day 1", "value": "T1"},
-    {"label": "Day 2", "value": "T2"},
-    {"label": "Day 3", "value": "T3"},
+    # ---- TESTING ----
+    {"label": "Day 1", "value": "Day 1"},
+    {"label": "Day 2", "value": "Day 2"},
+    {"label": "Day 3", "value": "Day 3"},
 ]
 
 # ---------- Loaders ----------
-@lru_cache(maxsize=64)
-def load_session_laps(year:int, event_value:str, sess_code:str):
-    """
-    event_value:
-      - 'GP|<EventName>'
-      - 'TEST|<test_number>'  (1..)
-    sess_code:
-      - GP: FP1/FP2/FP3/SQ/Q/SR/R
-      - TEST: T1/T2/T3
-    """
-    event_value = str(event_value)
-    sess_code = str(sess_code).upper()
-    kind, payload = event_value.split("|", 1)
+@lru_cache(maxsize=32)
+def load_session_laps(year:int, event_name:str, sess_code:str):
 
-    if kind == "TEST":
-        test_number = int(payload)
-        day_number = int(sess_code.replace("T", ""))  # T1->1
-        ses = ff1.get_testing_session(int(year), test_number, day_number)
-        ses.load(laps=True, telemetry=False, weather=False, messages=False)
-        return ses
+    # --- TESTING SUPPORT ---
+    # Testing sessions come as "Day 1", "Day 2", "Day 3"
+    if isinstance(sess_code, str) and sess_code.lower().startswith("day"):
+        try:
+            # convert "Day 1" -> 1
+            day_num = int(sess_code.split()[-1])
+            ses = ff1.get_testing_session(year, day_num)
+            ses.load(laps=True, telemetry=False, weather=False, messages=False)
+            return ses
+        except Exception:
+            raise
 
-    event_name = payload
+    # --- NORMAL WEEKEND ---
     try:
-        ses = ff1.get_session(int(year), event_name, sess_code)
+        ses = ff1.get_session(int(year), event_name, str(sess_code))
     except Exception:
-        if sess_code == "SQ":
+        if str(sess_code).upper() == "SQ":
             ses = ff1.get_session(int(year), event_name, "SS")
         else:
             raise
+
     ses.load(laps=True, telemetry=False, weather=False, messages=False)
     return ses
 
