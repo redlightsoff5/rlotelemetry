@@ -7,6 +7,7 @@ Thumbs.db
 .venv/
 venv/
 
+# caches - never commit
 cache/
 .fastf1_cache/
 fastf1_cache/
@@ -15,6 +16,8 @@ flask_cache/
 *.db
 *.parquet
 *.pkl
+*.arrow
+*.feather
 
 .vscode/
 .idea/
