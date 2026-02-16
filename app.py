@@ -37,7 +37,7 @@ def default_year_value() -> int:
             continue
     return YEARS_ALLOWED[0]
 
-SITE_TITLE = "Telemetry by RedLightsOff"
+SITE_TITLE = "Telemetría by RedLightsOff"
 WATERMARK  = "@redlightsoff5"
 
 IG_URL  = os.getenv("IG_URL", "https://instagram.com/redlightsoff5")
@@ -195,7 +195,7 @@ def get_schedule_df(year: int, date_token: str) -> pd.DataFrame:
 
 def build_gp_options(year: int):
     df = get_schedule_df(year, _utc_today_token())
-    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+    testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate")
     test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
 
     opts = []
@@ -203,7 +203,7 @@ def build_gp_options(year: int):
         fmt = str(r.EventFormat).lower()
         date = r.EventDate.date()
         name = str(r.EventName)
-        if fmt == "testing":
+        if "test" in fmt:
             test_number = test_dates.index(str(date)) + 1
             opts.append({"label": f"Pre-Season Testing #{test_number} ({date})", "value": f"TEST|{test_number}"})
         else:
@@ -216,56 +216,15 @@ def default_event_value(year: int):
     past = df[df["EventDate"] <= today].sort_values("EventDate")
     if past.empty:
         return None
+
     last = past.iloc[-1]
-    if str(last["EventFormat"]).lower() == "testing":
-        testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-        test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
-        test_number = test_dates.index(str(last["EventDate"].date())) + 1
+    if "test" in str(last["EventFormat"]).lower():
+        testing_df = df[df["EventFormat"].str.contains("test", na=False)].sort_values("EventDate").reset_index(drop=True)
+        test_keys = {(r.EventDate.date(), str(r.EventName)): i + 1 for i, r in testing_df.iterrows()}
+        test_number = test_keys.get((last["EventDate"].date(), str(last["EventName"])), 1)
         return f"TEST|{test_number}"
+
     return f"GP|round={int(last['RoundNumber'])}|name={str(last['EventName'])}"
-
-SESSION_OPTIONS = [
-    {"label": "FP1", "value": "FP1"},
-    {"label": "FP2", "value": "FP2"},
-    {"label": "FP3", "value": "FP3"},
-    {"label": "Sprint Qualifying", "value": "SQ"},
-    {"label": "Qualifying", "value": "Q"},
-    {"label": "Sprint", "value": "SR"},
-    {"label": "Race", "value": "R"},
-]
-TEST_SESSION_OPTIONS = [
-    {"label": "Day 1", "value": "T1"},
-    {"label": "Day 2", "value": "T2"},
-    {"label": "Day 3", "value": "T3"},
-]
-
-@lru_cache(maxsize=64)
-def load_session(year: int, event_value: str, sess_code: str, telemetry: bool = False):
-    event_value = str(event_value)
-    sess_code = str(sess_code).upper()
-    kind, payload = event_value.split("|", 1)
-
-    if kind == "TEST":
-        test_number = int(payload)
-        day_number = int(sess_code.replace("T", ""))
-        ses = ff1.get_testing_session(int(year), test_number, day_number)
-        ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
-        return ses
-
-    name = payload.split("|name=", 1)[-1]
-    try:
-        ses = ff1.get_session(int(year), name, sess_code)
-    except Exception:
-        if sess_code == "SQ":
-            ses = ff1.get_session(int(year), name, "SS")
-        else:
-            raise
-    ses.load(laps=True, telemetry=telemetry, weather=False, messages=False)
-    return ses
-
-@lru_cache(maxsize=64)
-def load_session_laps(year: int, event_value: str, sess_code: str):
-    return load_session(year, event_value, sess_code, telemetry=False)
 
 def session_year(ses) -> int:
     try:
@@ -451,12 +410,12 @@ app.index_string = f"""<!DOCTYPE html>
       <img src="/assets/logo.png" alt="logo"/>
     </div>
     <div class="rlo-brand">
-      <div class="rlo-title"><span>RLO</span> Telemetry</div>
+      <div class="rlo-title"><span>RLO</span> Telemetría</div>
       <div class="rlo-subtitle">by @redlightsoff5</div>
     </div>
     <div class="rlo-actions">
       <a class="rlo-action rlo-ig" href="{IG_URL}" target="_blank" rel="noopener noreferrer">Instagram</a>
-      <a class="rlo-action rlo-bmc" href="{BMC_URL}" target="_blank" rel="noopener noreferrer">Support</a>
+      <a class="rlo-action rlo-bmc" href="{BMC_URL}" target="_blank" rel="noopener noreferrer">Apoyar</a>
     </div>
   </div>
 
@@ -475,7 +434,7 @@ def header_controls():
     y0 = default_year_value()
     return dbc.Row([
         dbc.Col([
-            dbc.Label("Year"),
+            dbc.Label("Año"),
             dcc.Dropdown(id="year-dd",
                          options=[{"label": str(y), "value": y} for y in YEARS_ALLOWED],
                          value=y0,
@@ -483,15 +442,15 @@ def header_controls():
             html.Div(id="year-warning", className="mt-1", style={"fontSize": "0.85rem", "opacity": 0.85})
         ], md=3),
         dbc.Col([
-            dbc.Label("Grand Prix / Testing"),
+            dbc.Label("Gran Premio / Test"),
             dcc.Dropdown(id="event-dd",
                          options=build_gp_options(y0),
                          value=default_event_value(y0),
                          clearable=False,
-                         placeholder="Select event...")
+                         placeholder="Selecciona evento...")
         ], md=6),
         dbc.Col([
-            dbc.Label("Session"),
+            dbc.Label("Sesión"),
             dcc.Dropdown(id="session-dd",
                          options=SESSION_OPTIONS,
                          value="R",
@@ -507,7 +466,7 @@ def graph_box(graph_id: str, title: str, chart_key: str, height=420):
                 dcc.Dropdown(
                     id={"role": "drv", "chart": chart_key},
                     multi=True,
-                    placeholder="Select drivers",
+                    placeholder="Selecciona pilotos",
                     options=[],
                     value=[]
                 )
@@ -528,10 +487,10 @@ def telemetry_compare_box(graph_id: str, title: str, chart_key: str, height=460)
     return html.Div(className="box", children=[
         dbc.Row([
             dbc.Col(html.H5(title, className="m-0"), md=4, style={"display": "flex", "alignItems": "center"}),
-            dbc.Col([dcc.Dropdown(id={"role": "cmpA", "chart": chart_key}, options=[], value=None, clearable=True, placeholder="Driver A")], md=3),
-            dbc.Col([dcc.Dropdown(id={"role": "cmpB", "chart": chart_key}, options=[], value=None, clearable=True, placeholder="Driver B")], md=3),
+            dbc.Col([dcc.Dropdown(id={"role": "cmpA", "chart": chart_key}, options=[], value=None, clearable=True, placeholder="Piloto A")], md=3),
+            dbc.Col([dcc.Dropdown(id={"role": "cmpB", "chart": chart_key}, options=[], value=None, clearable=True, placeholder="Piloto B")], md=3),
             dbc.Col([dcc.Dropdown(id={"role": "pick", "chart": chart_key},
-                                  options=[{"label": "Best lap", "value": "best"}, {"label": "Last lap", "value": "last"}],
+                                  options=[{"label": "Mejor vuelta", "value": "best"}, {"label": "Última vuelta", "value": "last"}],
                                   value="best", clearable=False)], md=2),
         ], className="g-2 align-items-center"),
         dcc.Loading(
@@ -558,18 +517,18 @@ def tab_performance():
 
 def tab_strategy():
     return html.Div([
-        dbc.Row([dbc.Col(graph_box("tyre-strategy", "Tyre Strategy", "ty"), md=12)], className="g-2"),
-        dbc.Row([dbc.Col(graph_box("compound-usage", "Compound usage (laps)", "cu"), md=6),
+        dbc.Row([dbc.Col(graph_box("tyre-strategy", "Tyre Estrategia", "ty"), md=12)], className="g-2"),
+        dbc.Row([dbc.Col(graph_box("compound-usage", "Uso de compuestos (vueltas)", "cu"), md=6),
                  dbc.Col(graph_box("pit-hist", "Pit stop laps", "pith"), md=6)], className="g-2 mt-1"),
         dbc.Row([dbc.Col(graph_box("degradation", "Degradation (LapTime vs TyreLife)", "deg"), md=12)], className="g-2 mt-1"),
     ])
 
 def tab_telemetry():
     return html.Div([
-        dbc.Row([dbc.Col(telemetry_compare_box("tel-speed", "Telemetry: Speed vs Distance", "telspeed"), md=12)], className="g-2"),
-        dbc.Row([dbc.Col(telemetry_compare_box("tel-thrbrk", "Telemetry: Throttle / Brake", "telthr"), md=12)], className="g-2 mt-1"),
-        dbc.Row([dbc.Col(telemetry_compare_box("tel-gear", "Telemetry: Gear / RPM", "telgear"), md=12)], className="g-2 mt-1"),
-        dbc.Row([dbc.Col(telemetry_compare_box("tel-delta", "Telemetry: Delta time (proxy)", "teldelta"), md=12)], className="g-2 mt-1"),
+        dbc.Row([dbc.Col(telemetry_compare_box("tel-speed", "Telemetría: Speed vs Distance", "telspeed"), md=12)], className="g-2"),
+        dbc.Row([dbc.Col(telemetry_compare_box("tel-thrbrk", "Telemetría: Throttle / Brake", "telthr"), md=12)], className="g-2 mt-1"),
+        dbc.Row([dbc.Col(telemetry_compare_box("tel-gear", "Telemetría: Gear / RPM", "telgear"), md=12)], className="g-2 mt-1"),
+        dbc.Row([dbc.Col(telemetry_compare_box("tel-delta", "Telemetría: Delta de tiempo (aprox.)", "teldelta"), md=12)], className="g-2 mt-1"),
     ])
 
 app.layout = dbc.Container([
@@ -580,9 +539,9 @@ app.layout = dbc.Container([
         parent_className="rlo-tabs-parent",
         className="rlo-tabs",
         children=[
-            dcc.Tab(label="Performance", value="perf", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Strategy", value="strat", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="Telemetry", value="tele", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Rendimiento", value="perf", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Estrategia", value="strat", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Telemetría", value="tele", className="rlo-tab", selected_className="rlo-tab--selected"),
         ],
     ),
     html.Div(id="tab-body", className="mt-2", children=tab_performance()),
@@ -670,7 +629,7 @@ def fill_dropdowns(drivers, _children, drv_ids, a_ids, b_ids):
     drv_vals = [[] for _ in range(len(drv_ids))]
     return [opts] * len(drv_ids), drv_vals, [opts] * len(a_ids), [opts] * len(b_ids)
 
-# ===== Performance charts =====
+# ===== Rendimiento charts =====
 @app.callback(Output("gap", "figure"),
               Input("store", "data"),
               Input({"role": "drv", "chart": "gap"}, "value"),
@@ -685,12 +644,12 @@ def chart_gap(data, selected, color_map):
     if df.empty:
         return fig_empty("Gap — no data")
     if is_race(ses):
-        f = px.line(df, x="LapNumber", y="Gap_s", color="Driver", custom_data=["GapStr"], title="Gap to Leader (MM:SS.mmm)")
+        f = px.line(df, x="LapNumber", y="Gap_s", color="Driver", custom_data=["GapStr"], title="Diferencia al líder (MM:SS.mmm)")
         f.update_traces(hovertemplate="%{fullData.name} — Lap %{x}<br>%{customdata[0]}<extra></extra>")
         f.update_yaxes(title="time", tickvals=[])
     else:
         gg = df.sort_values("Gap_s")
-        f = px.bar(gg, x="Driver", y="Gap_s", custom_data=["GapStr"], title="Gap to Session Best (MM:SS.mmm)")
+        f = px.bar(gg, x="Driver", y="Gap_s", custom_data=["GapStr"], title="Gap to Sesión Best (MM:SS.mmm)")
         f.update_traces(hovertemplate="%{x}<br>%{customdata[0]}<extra></extra>")
         f.update_yaxes(title="time", tickvals=[])
     return set_trace_color(polish(f), color_map)
@@ -708,7 +667,7 @@ def chart_lapchart(data, selected, color_map):
         laps = laps[laps["Driver"].isin(selected)]
     if laps.empty:
         return fig_empty("Lapchart — no data")
-    f = px.line(laps, x="LapNumber", y="Position", color="Driver", title="Lapchart (lower = better)")
+    f = px.line(laps, x="LapNumber", y="Position", color="Driver", title="Posiciones por vuelta (más bajo = mejor)")
     f.update_yaxes(autorange="reversed", dtick=1)
     return set_trace_color(polish(f), color_map)
 
@@ -727,7 +686,7 @@ def chart_evolution(data, selected, color_map):
         return fig_empty("Evolution — no lap data")
     df = df.sort_values(["Driver", "LapNumber"])
     df["MA3"] = df.groupby("Driver")["LapSeconds"].transform(lambda s: s.rolling(3, min_periods=1).mean())
-    f = px.line(df, x="LapNumber", y="MA3", color="Driver", title="Evolution Pace (3-lap MA)")
+    f = px.line(df, x="LapNumber", y="MA3", color="Driver", title="Evolución del ritmo (media móvil 3 vueltas)")
     f.update_traces(hovertemplate="%{fullData.name} — Lap %{x}<br>%{y:.3f}s<extra></extra>")
     f.update_yaxes(title="sec (MA3)")
     return set_trace_color(polish(f), color_map)
@@ -745,7 +704,7 @@ def chart_consistency(data, selected, color_map):
         df = df[df["Driver"].isin(selected)]
     if df.empty:
         return fig_empty("Consistency — no lap data")
-    f = px.scatter(df, x="LapNumber", y="LapSeconds", color="Driver", title="Consistency Scatter")
+    f = px.scatter(df, x="LapNumber", y="LapSeconds", color="Driver", title="Dispersión de consistencia")
     f.update_traces(hovertemplate="%{fullData.name} — Lap %{x}<br>%{y:.3f}s<extra></extra>")
     f.update_yaxes(title="sec")
     return set_trace_color(polish(f), color_map)
@@ -763,7 +722,7 @@ def chart_sector_box(data, selected, color_map):
         df = df[df["Driver"].isin(selected)]
     if df.empty:
         return fig_empty("Sector split — no data")
-    f = px.box(df, x="Sector", y="Time_s", color="Driver", title="Sector times distribution (box)")
+    f = px.box(df, x="Sector", y="Time_s", color="Driver", title="Distribución de tiempos por sector (box)")
     f.update_traces(hovertemplate="%{fullData.name} — %{x}<br>%{y:.3f}s<extra></extra>")
     f.update_yaxes(title="sec")
     return set_trace_color(polish(f), color_map)
@@ -781,7 +740,7 @@ def chart_bestlaps(data, selected, color_map):
         best = best[best["Driver"].isin(selected)]
     if best.empty:
         return fig_empty("Best Laps — no data")
-    f = px.bar(best, x="Driver", y="Best_s", custom_data=["BestStr"], title="Best Laps (MM:SS.mmm)")
+    f = px.bar(best, x="Driver", y="Best_s", custom_data=["BestStr"], title="Mejores vueltas (MM:SS.mmm)")
     f.update_traces(hovertemplate="%{x}<br>%{customdata[0]}<extra></extra>")
     f.update_yaxes(title="time", tickvals=[])
     return set_trace_color(polish(f), color_map)
@@ -802,24 +761,24 @@ def chart_speeds(data, selected, color_map):
     if spd.empty:
         return fig_empty("Speed Metrics — no data")
     dm = spd.melt(id_vars="Driver", var_name="Metric", value_name="km/h")
-    f = px.bar(dm, x="Driver", y="km/h", color="Metric", barmode="group", title="Speed traps (max per driver)")
+    f = px.bar(dm, x="Driver", y="km/h", color="Metric", barmode="group", title="Velocidades máximas (por piloto)")
     f.update_yaxes(title="km/h")
     f.update_traces(marker_line_width=0)
     return set_trace_color(polish(f), color_map)
 
-# ===== Strategy charts =====
+# ===== Estrategia charts =====
 @app.callback(Output("tyre-strategy", "figure"),
               Input("store", "data"),
               Input({"role": "drv", "chart": "ty"}, "value"))
 def chart_tyres(data, selected):
     if not data:
-        return fig_empty("Tyre Strategy — (no data)")
+        return fig_empty("Tyre Estrategia — (no data)")
     ses = load_session_laps(int(data["year"]), data["event"], data["sess"])
     st = tyre_stints_df(ses)
     if selected:
         st = st[st["Driver"].isin(selected)]
     if st.empty:
-        return fig_empty("Tyre Strategy — no data")
+        return fig_empty("Tyre Estrategia — no data")
     cmap = {"SOFT": "#DA291C", "MEDIUM": "#FFD12E", "HARD": "#F0F0F0", "INTERMEDIATE": "#43B02A", "WET": "#00A3E0"}
     f = go.Figure()
     order = st["Driver"].unique().tolist()[::-1]
@@ -832,7 +791,7 @@ def chart_tyres(data, selected):
         ))
     for n, c in cmap.items():
         f.add_trace(go.Bar(x=[None], y=[None], marker_color=c, name=n, showlegend=True))
-    f.update_layout(title="Tyre Strategy", barmode="stack",
+    f.update_layout(title="Tyre Estrategia", barmode="stack",
                     yaxis=dict(categoryorder="array", categoryarray=order, title="Driver"),
                     xaxis_title="Lap")
     return polish(f, grid=True)
@@ -849,7 +808,7 @@ def chart_compound_usage(data, selected):
         df = df[df["Driver"].isin(selected)]
     if df.empty:
         return fig_empty("Compound usage — no data")
-    f = px.bar(df, x="Driver", y="Laps", color="Compound", barmode="stack", title="Compound usage (laps)")
+    f = px.bar(df, x="Driver", y="Laps", color="Compound", barmode="stack", title="Uso de compuestos (vueltas)")
     f.update_traces(marker_line_width=0)
     return polish(f)
 
@@ -865,7 +824,7 @@ def chart_pits(data, selected):
         df = df[df["Driver"].isin(selected)]
     if df.empty:
         return fig_empty("Pit stop laps — no data")
-    f = px.histogram(df, x="LapNumber", color="Driver", nbins=25, title="Pit stop lap distribution (approx)")
+    f = px.histogram(df, x="LapNumber", color="Driver", nbins=25, title="Distribución de paradas (aprox.)")
     f.update_layout(barmode="overlay")
     return polish(f)
 
@@ -885,12 +844,12 @@ def chart_degradation(data, selected, color_map):
         df = df[df["Driver"].isin(selected)]
     if df.empty:
         return fig_empty("Degradation — no data")
-    f = px.scatter(df, x="TyreLife", y="LapSeconds", color="Driver", title="Degradation: Lap time vs TyreLife")
+    f = px.scatter(df, x="TyreLife", y="LapSeconds", color="Driver", title="Degradación: tiempo de vuelta vs vida del neumático")
     f.update_traces(hovertemplate="%{fullData.name}<br>TyreLife %{x:.0f}<br>%{y:.3f}s<extra></extra>")
     f.update_yaxes(title="sec")
     return set_trace_color(polish(f), color_map)
 
-# ===== Telemetry charts =====
+# ===== Telemetría charts =====
 @app.callback(Output("tel-speed", "figure"),
               Input("store", "data"),
               Input({"role": "cmpA", "chart": "telspeed"}, "value"),
@@ -899,20 +858,20 @@ def chart_degradation(data, selected, color_map):
               State("team-color-store", "data"))
 def tel_speed(data, a, b, pick, color_map):
     if not data:
-        return fig_empty("Telemetry speed — (no data)")
+        return fig_empty("Telemetría speed — (no data)")
     if not a and not b:
-        return fig_empty("Telemetry speed — select Driver A and/or B")
+        return fig_empty("Telemetría speed — select Piloto A and/or B")
     year = int(data["year"]); ev = data["event"]; sc = data["sess"]
     dfA = _telemetry_df(year, ev, sc, a, pick) if a else pd.DataFrame()
     dfB = _telemetry_df(year, ev, sc, b, pick) if b else pd.DataFrame()
     if dfA.empty and dfB.empty:
-        return fig_empty("Telemetry speed — no telemetry available")
+        return fig_empty("Telemetría speed — no telemetry available")
     f = go.Figure()
     if not dfA.empty:
         f.add_trace(go.Scatter(x=dfA["Distance"], y=dfA["Speed"], mode="lines", name=dfA["Driver"].iloc[0]))
     if not dfB.empty:
         f.add_trace(go.Scatter(x=dfB["Distance"], y=dfB["Speed"], mode="lines", name=dfB["Driver"].iloc[0], line=dict(dash="dash")))
-    f.update_layout(title="Telemetry: Speed vs Distance")
+    f.update_layout(title="Telemetría: Speed vs Distance")
     f.update_xaxes(title="Distance (m)")
     f.update_yaxes(title="Speed (km/h)")
     return set_trace_color(polish(f), color_map)
@@ -925,14 +884,14 @@ def tel_speed(data, a, b, pick, color_map):
               State("team-color-store", "data"))
 def tel_thrbrk(data, a, b, pick, color_map):
     if not data:
-        return fig_empty("Telemetry throttle/brake — (no data)")
+        return fig_empty("Telemetría throttle/brake — (no data)")
     if not a and not b:
-        return fig_empty("Telemetry throttle/brake — select Driver A and/or B")
+        return fig_empty("Telemetría throttle/brake — select Piloto A and/or B")
     year = int(data["year"]); ev = data["event"]; sc = data["sess"]
     dfA = _telemetry_df(year, ev, sc, a, pick) if a else pd.DataFrame()
     dfB = _telemetry_df(year, ev, sc, b, pick) if b else pd.DataFrame()
     if dfA.empty and dfB.empty:
-        return fig_empty("Telemetry throttle/brake — no telemetry available")
+        return fig_empty("Telemetría throttle/brake — no telemetry available")
 
     f = go.Figure()
     def add_traces(df, dash_th="solid", dash_br="dot"):
@@ -944,7 +903,7 @@ def tel_thrbrk(data, a, b, pick, color_map):
     if not dfB.empty:
         add_traces(dfB, "dash", "dashdot")
 
-    f.update_layout(title="Telemetry: Throttle / Brake")
+    f.update_layout(title="Telemetría: Throttle / Brake")
     f.update_xaxes(title="Distance (m)")
     f.update_yaxes(title="%", range=[0, 105])
 
@@ -964,14 +923,14 @@ def tel_thrbrk(data, a, b, pick, color_map):
               State("team-color-store", "data"))
 def tel_gear(data, a, b, pick, color_map):
     if not data:
-        return fig_empty("Telemetry gear/rpm — (no data)")
+        return fig_empty("Telemetría gear/rpm — (no data)")
     if not a and not b:
-        return fig_empty("Telemetry gear/rpm — select Driver A and/or B")
+        return fig_empty("Telemetría gear/rpm — select Piloto A and/or B")
     year = int(data["year"]); ev = data["event"]; sc = data["sess"]
     dfA = _telemetry_df(year, ev, sc, a, pick) if a else pd.DataFrame()
     dfB = _telemetry_df(year, ev, sc, b, pick) if b else pd.DataFrame()
     if dfA.empty and dfB.empty:
-        return fig_empty("Telemetry gear/rpm — no telemetry available")
+        return fig_empty("Telemetría gear/rpm — no telemetry available")
 
     f = go.Figure()
     def add(df, dash_g="solid", dash_r="dot"):
@@ -983,7 +942,7 @@ def tel_gear(data, a, b, pick, color_map):
     if not dfB.empty:
         add(dfB, "dash", "dashdot")
 
-    f.update_layout(title="Telemetry: Gear / RPM")
+    f.update_layout(title="Telemetría: Gear / RPM")
     f.update_xaxes(title="Distance (m)")
     f.update_yaxes(title="Gear / RPM")
 
@@ -1002,14 +961,14 @@ def tel_gear(data, a, b, pick, color_map):
               Input({"role": "pick", "chart": "teldelta"}, "value"))
 def tel_delta(data, a, b, pick):
     if not data:
-        return fig_empty("Telemetry delta — (no data)")
+        return fig_empty("Telemetría delta — (no data)")
     if not a or not b:
-        return fig_empty("Telemetry delta — select Driver A and Driver B")
+        return fig_empty("Telemetría delta — select Piloto A and Piloto B")
     year = int(data["year"]); ev = data["event"]; sc = data["sess"]
     dfA = _telemetry_df(year, ev, sc, a, pick)
     dfB = _telemetry_df(year, ev, sc, b, pick)
     if dfA.empty or dfB.empty:
-        return fig_empty("Telemetry delta — telemetry not available")
+        return fig_empty("Telemetría delta — telemetry not available")
     grid = np.linspace(0, min(dfA["Distance"].max(), dfB["Distance"].max()), 2000)
     vA = np.interp(grid, dfA["Distance"].to_numpy(), dfA["Speed"].to_numpy()) / 3.6
     vB = np.interp(grid, dfB["Distance"].to_numpy(), dfB["Speed"].to_numpy()) / 3.6
@@ -1019,7 +978,7 @@ def tel_delta(data, a, b, pick):
     tA = np.cumsum(ds / vA)
     tB = np.cumsum(ds / vB)
     out = pd.DataFrame({"Distance": grid, "Delta_s": (tB - tA)})
-    f = px.line(out, x="Distance", y="Delta_s", title=f"Delta time (proxy): {b} vs {a}")
+    f = px.line(out, x="Distance", y="Delta_s", title=f"Delta de tiempo (aprox.): {b} vs {a}")
     f.update_traces(hovertemplate="Dist %{x:.0f}m<br>Δ %{y:.3f}s<extra></extra>")
     f.update_yaxes(title="Δ seconds (B - A)")
     return polish(f)
