@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 pio.templates.default = 'plotly_white'
 
-from dash import Dash, dcc, html, Input, Output, State, no_update, ALL, MATCH
+from dash import Dash, dcc, html, Input, Output, State, no_update, ALL
 import dash_bootstrap_components as dbc
 
 # ================= Setup & cache =================
@@ -186,73 +186,47 @@ def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
     df = df[['RoundNumber','EventName','EventFormat','EventDate']].sort_values(['EventDate','RoundNumber']).reset_index(drop=True)
     return df
 
-def testing_blocks(df: pd.DataFrame):
-    """Return list of blocks, each block is a list of 3 testing dates (Timestamp)."""
-    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-    dates = testing_df["EventDate"].tolist()
-    blocks = [dates[i:i+3] for i in range(0, len(dates), 3)]
-    return [b for b in blocks if len(b) == 3]
-
-def build_gp_options(year: int):
+def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
 
-    blocks = testing_blocks(df)
+    # determine test_number by chronological order among testing events
+    testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
+    test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
 
     opts = []
-
-    # Add testing options (one per 3-day block)
-    for i, b in enumerate(blocks, start=1):
-        d0 = b[0].date()
-        d1 = b[-1].date()
-        opts.append({
-            "label": f"Pre-Season Testing #{i} ({d0}–{d1})",
-            "value": f"TEST|{i}"
-        })
-
-    # Add GP options
-    for _, r in df[df["EventFormat"] != "testing"].sort_values(["EventDate", "RoundNumber"]).iterrows():
+    for _, r in df.sort_values(['EventDate','RoundNumber']).iterrows():
+        fmt = str(r.EventFormat).lower()
         date = r.EventDate.date()
         name = str(r.EventName)
-        opts.append({
-            "label": f"R{int(r.RoundNumber)} — {name} ({date})",
-            "value": f"GP|{name}"
-        })
 
-    # Keep everything chronological overall (testing first if earlier)
-    # Sorting by date is easiest by rebuilding a sortable key:
-    def _key(o):
-        if o["value"].startswith("TEST|"):
-            tn = int(o["value"].split("|")[1])
-            return blocks[tn-1][0] if blocks else pd.Timestamp.max
-        # GP: parse date in label (already in df; safer: map via EventName)
-        return pd.Timestamp.max
-
-    # Don't over-sort: tests are already chronological; GPs are chronological.
+        if fmt == "testing":
+            test_number = test_dates.index(str(date)) + 1
+            opts.append({
+                "label": f"Pre-Season Testing #{test_number} ({date})",
+                "value": f"TEST|{test_number}"
+            })
+        else:
+            opts.append({
+                "label": f"R{int(r.RoundNumber)} — {name} ({date})",
+                "value": f"GP|{name}"
+            })
     return opts
 
-def default_event_value(year: int):
+def default_event_value(year:int):
     df = get_schedule_df(year, _utc_today_token())
     today = pd.Timestamp.utcnow().tz_localize(None)
-
-    past = df[df["EventDate"] <= today].sort_values("EventDate")
+    past = df[df['EventDate'] <= today].sort_values('EventDate')
     if past.empty:
         return None
 
     last = past.iloc[-1]
-
-    if str(last["EventFormat"]).lower() == "testing":
-        blocks = testing_blocks(df)
-        if not blocks:
-            return "TEST|1"
-
-        last_date = pd.to_datetime(last["EventDate"]).date()
-        for i, b in enumerate(blocks, start=1):
-            if any(d.date() == last_date for d in b):
-                return f"TEST|{i}"
-        return "TEST|1"
+    if str(last['EventFormat']).lower() == 'testing':
+        testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
+        test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
+        test_number = test_dates.index(str(last['EventDate'].date())) + 1
+        return f"TEST|{test_number}"
 
     return f"GP|{str(last['EventName'])}"
-
 
 SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
@@ -304,6 +278,65 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
             raise
     ses.load(laps=True, telemetry=False, weather=False, messages=False)
     return ses
+
+# ---------- Loaders (telemetry) ----------
+@lru_cache(maxsize=32)
+def load_session_telemetry(year:int, event_value:str, sess_code:str):
+    """
+    Same as load_session_laps, but loads telemetry=True.
+    Cached separately so we don't change behavior/perf of existing tabs.
+    """
+    event_value = str(event_value)
+    sess_code = str(sess_code).upper()
+
+    kind, payload = event_value.split("|", 1)
+
+    if kind == "TEST":
+        test_number = int(payload)
+        day_number = int(sess_code.replace("T", ""))  # T1->1
+        ses = ff1.get_testing_session(int(year), test_number, day_number)
+        ses.load(laps=True, telemetry=True, weather=False, messages=False)
+        return ses
+
+    event_name = payload
+    try:
+        ses = ff1.get_session(int(year), event_name, sess_code)
+    except Exception:
+        if sess_code == "SQ":
+            ses = ff1.get_session(int(year), event_name, "SS")
+        else:
+            raise
+    ses.load(laps=True, telemetry=True, weather=False, messages=False)
+    return ses
+
+
+def fastest_lap_car_data(ses, driver: str) -> pd.DataFrame:
+    """
+    Returns car data (with Distance) for the driver's fastest lap in the loaded session.
+    Uses get_car_data() which includes: Speed, RPM, nGear, Throttle, Brake, etc.
+    """
+    laps = ses.laps.dropna(subset=['LapTime'])
+    laps = laps[laps['Driver'] == driver]
+    if laps.empty:
+        return pd.DataFrame()
+
+    lap = laps.loc[laps['LapTime'].idxmin()]
+    try:
+        cd = lap.get_car_data().add_distance()
+    except Exception:
+        return pd.DataFrame()
+
+    if cd is None or cd.empty:
+        return pd.DataFrame()
+
+    cd = cd.reset_index(drop=True)
+    # standardize expected columns
+    for col in ["Distance", "Speed", "RPM", "nGear", "Throttle", "Brake"]:
+        if col not in cd.columns:
+            cd[col] = np.nan
+    cd["Driver"] = driver
+    return cd
+
 
 # ---------- Builders ----------
 def driver_team_color_map(ses):
@@ -484,6 +517,7 @@ def export_df_for_chart(chart_key: str, ses, selected_drivers):
 
     return pd.DataFrame()
 
+
 # ================= Dash =================
 external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
@@ -629,6 +663,18 @@ def tab_records():
 def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
+def tab_telemetry():
+    return html.Div([
+        dbc.Row([
+            dbc.Col(graph_box('tel-speed',    'Speed vs Distance (fastest lap)',       'tel_spd'), md=6),
+            dbc.Col(graph_box('tel-controls', 'Throttle & Brake vs Distance (fastest lap)', 'tel_ctl'), md=6),
+        ], className="g-2"),
+        dbc.Row([
+            dbc.Col(graph_box('tel-gear',     'Gear vs RPM (fastest lap)',             'tel_gr'), md=6),
+            dbc.Col(graph_box('tel-map',      'Track Map (colored by Speed)',         'tel_map'), md=6),
+        ], className="g-2 mt-1"),
+    ])
+
 app.layout = dbc.Container([
     header_controls(),
     dcc.Tabs(
@@ -642,6 +688,7 @@ app.layout = dbc.Container([
             dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
+	    dcc.Tab(label="Telemetry", value="telemetry", className="rlo-tab", selected_className="rlo-tab--selected"),	
         ],
     ),
     html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
@@ -653,7 +700,7 @@ app.layout = dbc.Container([
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
-            "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
+            "records":tab_records, "speeds":tab_speeds, "telemetry":tab_telemetry}.get(val, tab_evolution)()
 
 # NEW: Session dropdown changes depending on whether event is TEST or GP
 @app.callback(
@@ -690,15 +737,7 @@ def load_session_meta(year, event_value, sess_code):
         return no_update, [], {}
     try:
         ses = load_session_laps(int(year), str(event_value), str(sess_code))
-        try:
-            laps = ses.laps.dropna(subset=["LapTime"])
-        except ff1.exceptions.DataNotLoadedError:
-            # one forced reload in case FastF1 returned an unloaded session object
-            try:
-                ses.load(laps=True, telemetry=False, weather=False, messages=False)
-                laps = ses.laps.dropna(subset=["LapTime"])
-            except Exception:
-                raise
+        laps = ses.laps.dropna(subset=['LapTime'])
         drivers = sorted(laps['Driver'].dropna().unique().tolist())
         colors = driver_team_color_map(ses)
         return {'year': int(year), 'event': str(event_value), 'sess': str(sess_code)}, drivers, colors
@@ -933,6 +972,193 @@ def chart_speeds(data, selected):
     f.update_layout(yaxis_title="km/h")
     return polish(f)
 
+#---------- Telemetry ----------
+@app.callback(
+    Output('tel-speed','figure'),
+    Input('store','data'),
+    Input({'role':'drv','chart':'tel_spd'}, 'value'),
+    State('team-color-store','data')
+)
+def chart_tel_speed(data, selected, color_map):
+    if not data: 
+        return fig_empty("(no data)")
+    selected = selected or []
+    if not selected:
+        return fig_empty("Speed vs Distance — select drivers")
+
+    try:
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        f = go.Figure()
+        any_trace = False
+
+        for drv in selected:
+            cd = fastest_lap_car_data(ses, drv)
+            if cd.empty: 
+                continue
+            any_trace = True
+            f.add_trace(go.Scatter(
+                x=cd["Distance"], y=cd["Speed"],
+                mode="lines", name=str(drv),
+                hovertemplate=f"{drv}<br>Dist %{x:.0f} m<br>Speed %{y:.1f} km/h<extra></extra>"
+            ))
+
+        if not any_trace:
+            return fig_empty("Speed vs Distance — no telemetry")
+
+        f.update_layout(title="Speed vs Distance (fastest lap)")
+        f.update_xaxes(title="Distance (m)")
+        f.update_yaxes(title="Speed (km/h)")
+        return set_trace_color(polish(f), color_map)
+
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("Speed vs Distance — error")
+
+@app.callback(
+    Output('tel-controls','figure'),
+    Input('store','data'),
+    Input({'role':'drv','chart':'tel_ctl'}, 'value'),
+    State('team-color-store','data')
+)
+def chart_tel_controls(data, selected, color_map):
+    if not data:
+        return fig_empty("(no data)")
+    selected = selected or []
+    if not selected:
+        return fig_empty("Throttle & Brake — select drivers")
+
+    try:
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        f = go.Figure()
+        any_trace = False
+
+        for drv in selected:
+            cd = fastest_lap_car_data(ses, drv)
+            if cd.empty:
+                continue
+
+            # Brake can be bool; show as 0/100
+            brk = cd["Brake"]
+            if brk.dtype == bool or str(brk.dtype).lower() == "bool":
+                brk = brk.astype(int) * 100
+            else:
+                # if already 0/1 or 0/100-ish, clamp to [0,100] for display
+                brk = pd.to_numeric(brk, errors="coerce").fillna(0).clip(0, 100)
+
+            thr = pd.to_numeric(cd["Throttle"], errors="coerce").fillna(0).clip(0, 100)
+
+            any_trace = True
+            f.add_trace(go.Scatter(
+                x=cd["Distance"], y=thr,
+                mode="lines", name=f"{drv} — Throttle",
+                hovertemplate=f"{drv} Throttle<br>Dist %{x:.0f} m<br>%{{y:.0f}}%<extra></extra>"
+            ))
+            f.add_trace(go.Scatter(
+                x=cd["Distance"], y=brk,
+                mode="lines", name=f"{drv} — Brake",
+                line=dict(dash="dot"),
+                hovertemplate=f"{drv} Brake<br>Dist %{x:.0f} m<br>%{{y:.0f}}%<extra></extra>"
+            ))
+
+        if not any_trace:
+            return fig_empty("Throttle & Brake — no telemetry")
+
+        f.update_layout(title="Throttle & Brake vs Distance (fastest lap)")
+        f.update_xaxes(title="Distance (m)")
+        f.update_yaxes(title="Control (%)", range=[0, 100])
+        return set_trace_color(polish(f), color_map)
+
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("Throttle & Brake — error")
+
+@app.callback(
+    Output('tel-gear','figure'),
+    Input('store','data'),
+    Input({'role':'drv','chart':'tel_gr'}, 'value'),
+    State('team-color-store','data')
+)
+def chart_tel_gear_rpm(data, selected, color_map):
+    if not data:
+        return fig_empty("(no data)")
+    selected = selected or []
+    if not selected:
+        return fig_empty("Gear vs RPM — select drivers")
+
+    try:
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        f = go.Figure()
+        any_trace = False
+
+        for drv in selected:
+            cd = fastest_lap_car_data(ses, drv)
+            if cd.empty:
+                continue
+
+            rpm = pd.to_numeric(cd["RPM"], errors="coerce")
+            gear = pd.to_numeric(cd["nGear"], errors="coerce")
+            m = rpm.notna() & gear.notna()
+            if not m.any():
+                continue
+
+            any_trace = True
+            f.add_trace(go.Scatter(
+                x=rpm[m], y=gear[m],
+                mode="markers", name=str(drv),
+                marker=dict(size=4, opacity=0.45),
+                hovertemplate=f"{drv}<br>RPM %{{x:.0f}}<br>Gear %{{y:.0f}}<extra></extra>"
+            ))
+
+        if not any_trace:
+            return fig_empty("Gear vs RPM — no telemetry")
+
+        f.update_layout(title="Gear vs RPM (fastest lap)")
+        f.update_xaxes(title="RPM")
+        f.update_yaxes(title="Gear", dtick=1)
+        return set_trace_color(polish(f), color_map)
+
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("Gear vs RPM — error")
+
+@app.callback(
+    Output('tel-map','figure'),
+    Input('store','data'),
+    Input({'role':'drv','chart':'tel_map'}, 'value')
+)
+def chart_tel_map(data, selected):
+    if not data:
+        return fig_empty("(no data)")
+    selected = selected or []
+    if not selected:
+        return fig_empty("Track Map — select at least 1 driver")
+
+    # pick first selected driver for a clean map
+    drv = selected[0]
+
+    try:
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        cd = fastest_lap_car_data(ses, drv)
+        if cd.empty or not {"X", "Y", "Speed"}.issubset(cd.columns):
+            return fig_empty("Track Map — telemetry missing X/Y")
+
+        f = go.Figure(go.Scatter(
+            x=cd["X"], y=cd["Y"],
+            mode="lines",
+            line=dict(width=4),
+            customdata=np.stack([cd["Speed"]], axis=-1),
+            hovertemplate=f"{drv}<br>Speed %{customdata[0]:.1f} km/h<extra></extra>"
+        ))
+        # Color by speed (using line color requires plotly segment tricks; keep it simple & stable)
+        f.update_layout(title=f"Track Map (fastest lap) — {drv}")
+        f.update_xaxes(visible=False)
+        f.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
+        return polish(f)
+
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("Track Map — error")
+
 @app.callback(
     Output({"role":"csv-dl", "chart": MATCH}, "data"),
     Input({"role":"csv", "chart": MATCH}, "n_clicks"),
@@ -968,6 +1194,7 @@ def download_chart_csv(n_clicks, btn_id, store_data, selected):
         return no_update
 
 
+
 # ================= Run =================
 server = app.server
 from flask import jsonify
@@ -981,52 +1208,36 @@ def warmup():
     # Warmup schedule + try loading last past session/test for allowed years
     try:
         now = pd.Timestamp.utcnow().tz_localize(None)
-
         for y in YEARS_ALLOWED:
             try:
-                df = get_schedule_df(int(y), _utc_today_token())
+                df = get_schedule_df(y, _utc_today_token())
                 past = df[df["EventDate"] <= now].sort_values("EventDate")
                 if past.empty:
                     continue
-
                 last = past.iloc[-1]
 
                 if str(last["EventFormat"]).lower() == "testing":
-                    # Determine testing event number by EventName group order (wk1=1, wk2=2, ...)
+                    # pick test_number by date order
                     testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-                    g = (
-                        testing_df.groupby("EventName", dropna=False)["EventDate"]
-                        .min()
-                        .sort_values()
-                        .reset_index(drop=False)
-                        .reset_index()
-                        .rename(columns={"index": "test_number"})
-                    )
-                    last_test_name = str(last["EventName"])
-                    tn_row = g[g["EventName"] == last_test_name]
-                    test_number = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
-
+                    test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
+                    test_number = test_dates.index(str(last["EventDate"].date())) + 1
                     try:
-                        s = ff1.get_testing_session(int(y), int(test_number), 1)
+                        s = ff1.get_testing_session(y, test_number, 1)
                         s.load(telemetry=False, weather=False, messages=False)
                     except Exception:
                         pass
-
                 else:
                     gp = str(last["EventName"])
                     for sess_name in ("R", "Q"):
                         try:
-                            s = ff1.get_session(int(y), gp, sess_name)
+                            s = ff1.get_session(y, gp, sess_name)
                             s.load(telemetry=False, weather=False, messages=False)
                             break
                         except Exception:
                             continue
-
             except Exception:
                 continue
-
         return jsonify(status="warmed")
-
     except Exception as e:
         return jsonify(status="error", detail=str(e)), 500
 
