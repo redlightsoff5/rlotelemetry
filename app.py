@@ -189,27 +189,49 @@ def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
 def build_gp_options(year:int):
     df = get_schedule_df(year, _utc_today_token())
 
-    # determine test_number by chronological order among testing events
+    # Group testing rows by EventName -> each group is a testing "event" (week)
     testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
-    test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
+    if not testing_df.empty:
+        g = (testing_df.groupby('EventName', dropna=False)['EventDate']
+             .agg(['min','max'])
+             .reset_index()
+             .sort_values('min')
+             .reset_index(drop=True))
+        test_number_map = {row['EventName']: int(i+1) for i, row in g.iterrows()}
+    else:
+        g = pd.DataFrame(columns=['EventName','min','max'])
+        test_number_map = {}
 
     opts = []
+    added_tests = set()
+
     for _, r in df.sort_values(['EventDate','RoundNumber']).iterrows():
         fmt = str(r.EventFormat).lower()
-        date = r.EventDate.date()
         name = str(r.EventName)
 
         if fmt == "testing":
-            test_number = test_dates.index(str(date)) + 1
-            opts.append({
-                "label": f"Pre-Season Testing #{test_number} ({date})",
-                "value": f"TEST|{test_number}"
-            })
+            tn = test_number_map.get(name, 1)
+            val = f"TEST|{tn}"
+            if val in added_tests:
+                continue
+
+            row = g[g['EventName'] == name].iloc[0] if not g.empty else None
+            if row is not None:
+                d0 = row['min'].date()
+                d1 = row['max'].date()
+                label = f"Pre-Season Testing #{tn} ({d0}–{d1})"
+            else:
+                label = f"Pre-Season Testing #{tn}"
+
+            opts.append({"label": label, "value": val})
+            added_tests.add(val)
         else:
+            date = r.EventDate.date()
             opts.append({
                 "label": f"R{int(r.RoundNumber)} — {name} ({date})",
                 "value": f"GP|{name}"
             })
+
     return opts
 
 def default_event_value(year:int):
@@ -222,9 +244,17 @@ def default_event_value(year:int):
     last = past.iloc[-1]
     if str(last['EventFormat']).lower() == 'testing':
         testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
-        test_dates = testing_df['EventDate'].dt.date.astype(str).tolist()
-        test_number = test_dates.index(str(last['EventDate'].date())) + 1
-        return f"TEST|{test_number}"
+        g = (testing_df.groupby('EventName', dropna=False)['EventDate']
+             .min()
+             .sort_values()
+             .reset_index(drop=False)
+             .reset_index()
+             .rename(columns={'index':'test_number'}))
+        # newest testing event
+        last_test_name = str(last['EventName'])
+        tn_row = g[g['EventName'] == last_test_name]
+        tn = int(tn_row['test_number'].iloc[0]) + 1 if not tn_row.empty else 1
+        return f"TEST|{tn}"
 
     return f"GP|{str(last['EventName'])}"
 
@@ -958,8 +988,16 @@ def warmup():
                 if str(last["EventFormat"]).lower() == "testing":
                     # pick test_number by date order
                     testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-                    test_dates = testing_df["EventDate"].dt.date.astype(str).tolist()
-                    test_number = test_dates.index(str(last["EventDate"].date())) + 1
+	            g = (testing_df.groupby('EventName', dropna=False)['EventDate']
+                         .min()
+                         .sort_values()
+                         .reset_index(drop=False)
+                         .reset_index()
+                         .rename(columns={'index':'test_number'}))
+                    last_test_name = str(last["EventName"])
+                    tn_row = g[g['EventName'] == last_test_name]
+                    test_number = int(tn_row['test_number'].iloc[0]) + 1 if not tn_row.empty else 1
+
                     try:
                         s = ff1.get_testing_session(y, test_number, 1)
                         s.load(telemetry=False, weather=False, messages=False)
