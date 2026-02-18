@@ -238,17 +238,18 @@ def default_event_value(year: int):
         return None
 
     last = past.iloc[-1]
-    if str(last["EventFormat"]).lower() == "testing":
-	blocks = testing_blocks (df)
-	if not blocks:
-	    return "TEST|1"
+        if str(last["EventFormat"]).lower() == "testing":
+        blocks = testing_blocks(df)
+        if not blocks:
+            return "TEST|1"
 
-	last_date = pd.to_datetime(last["EventDate"]).date()
-	# find which block contains last_date
+        last_date = pd.to_datetime(last["EventDate"]).date()
+        # find which block contains last_date
         for i, b in enumerate(blocks, start=1):
             if any(d.date() == last_date for d in b):
                 return f"TEST|{i}"
         return "TEST|1"
+
         testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
         g = (
             testing_df.groupby("EventName", dropna=False)["EventDate"]
@@ -1003,21 +1004,25 @@ def warmup():
                 last = past.iloc[-1]
 
                 if str(last["EventFormat"]).lower() == "testing":
-    		    blocks = testing_blocks(df)
+                    # Determine testing event number by EventName group order (wk1=1, wk2=2, ...)
+                    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+                    g = (
+                        testing_df.groupby("EventName", dropna=False)["EventDate"]
+                        .min()
+                        .sort_values()
+                        .reset_index(drop=False)
+                        .reset_index()
+                        .rename(columns={"index": "test_number"})
+                    )
+                    last_test_name = str(last["EventName"])
+                    tn_row = g[g["EventName"] == last_test_name]
+                    test_number = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
 
-    		    last_date = pd.to_datetime(last["EventDate"]).date()
-                    test_number = 1
-                    for i, b in enumerate(blocks, start=1):
-        		if any(d.date() == last_date for d in b):
-            		    test_number = i
-            		    break
-
-    		    try:
+                    try:
                         s = ff1.get_testing_session(int(y), int(test_number), 1)
-        		s.load(telemetry=False, weather=False, messages=False)
-    	            except Exception:
-        		pass
-
+                        s.load(telemetry=False, weather=False, messages=False)
+                    except Exception:
+                        pass
 
                 else:
                     gp = str(last["EventName"])
