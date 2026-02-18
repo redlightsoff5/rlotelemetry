@@ -186,56 +186,48 @@ def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
     df = df[['RoundNumber','EventName','EventFormat','EventDate']].sort_values(['EventDate','RoundNumber']).reset_index(drop=True)
     return df
 
+def testing_blocks(df: pd.DataFrame):
+    """Return list of blocks, each block is a list of 3 testing dates (Timestamp)."""
+    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+    dates = testing_df["EventDate"].tolist()
+    blocks = [dates[i:i+3] for i in range(0, len(dates), 3)]
+    return [b for b in blocks if len(b) == 3]
+
 def build_gp_options(year: int):
     df = get_schedule_df(year, _utc_today_token())
 
-    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-
-    if not testing_df.empty:
-        g = (
-            testing_df.groupby("EventName", dropna=False)["EventDate"]
-            .agg(["min", "max"])
-            .reset_index()
-            .sort_values("min")
-            .reset_index(drop=True)
-        )
-        test_number_map = {row["EventName"]: int(i + 1) for i, row in g.iterrows()}
-    else:
-        g = pd.DataFrame(columns=["EventName", "min", "max"])
-        test_number_map = {}
+    blocks = testing_blocks(df)
 
     opts = []
-    added_tests = set()
 
-    for _, r in df.sort_values(["EventDate", "RoundNumber"]).iterrows():
-        fmt = str(r.EventFormat).lower()
+    # Add testing options (one per 3-day block)
+    for i, b in enumerate(blocks, start=1):
+        d0 = b[0].date()
+        d1 = b[-1].date()
+        opts.append({
+            "label": f"Pre-Season Testing #{i} ({d0}–{d1})",
+            "value": f"TEST|{i}"
+        })
+
+    # Add GP options
+    for _, r in df[df["EventFormat"] != "testing"].sort_values(["EventDate", "RoundNumber"]).iterrows():
+        date = r.EventDate.date()
         name = str(r.EventName)
+        opts.append({
+            "label": f"R{int(r.RoundNumber)} — {name} ({date})",
+            "value": f"GP|{name}"
+        })
 
-        if fmt == "testing":
-            tn = test_number_map.get(name, 1)
-            val = f"TEST|{tn}"
-            if val in added_tests:
-                continue
+    # Keep everything chronological overall (testing first if earlier)
+    # Sorting by date is easiest by rebuilding a sortable key:
+    def _key(o):
+        if o["value"].startswith("TEST|"):
+            tn = int(o["value"].split("|")[1])
+            return blocks[tn-1][0] if blocks else pd.Timestamp.max
+        # GP: parse date in label (already in df; safer: map via EventName)
+        return pd.Timestamp.max
 
-            if not g.empty and (g["EventName"] == name).any():
-                row = g[g["EventName"] == name].iloc[0]
-                d0 = row["min"].date()
-                d1 = row["max"].date()
-                label = f"Pre-Season Testing #{tn} ({d0}–{d1})"
-            else:
-                label = f"Pre-Season Testing #{tn}"
-
-            opts.append({"label": label, "value": val})
-            added_tests.add(val)
-        else:
-            date = r.EventDate.date()
-            opts.append(
-                {
-                    "label": f"R{int(r.RoundNumber)} — {name} ({date})",
-                    "value": f"GP|{name}",
-                }
-            )
-
+    # Don't over-sort: tests are already chronological; GPs are chronological.
     return opts
 
 def default_event_value(year: int):
@@ -247,6 +239,16 @@ def default_event_value(year: int):
 
     last = past.iloc[-1]
     if str(last["EventFormat"]).lower() == "testing":
+	blocks = testing_blocks (df)
+	if not blocks:
+	    return "TEST|1"
+
+	last_date = pd.to_datetime(last["EventDate"]).date()
+	# find which block contains last_date
+        for i, b in enumerate(blocks, start=1):
+            if any(d.date() == last_date for d in b):
+                return f"TEST|{i}"
+        return "TEST|1"
         testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
         g = (
             testing_df.groupby("EventName", dropna=False)["EventDate"]
@@ -1001,25 +1003,21 @@ def warmup():
                 last = past.iloc[-1]
 
                 if str(last["EventFormat"]).lower() == "testing":
-                    # Determine testing event number by EventName group order (wk1=1, wk2=2, ...)
-                    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-                    g = (
-                        testing_df.groupby("EventName", dropna=False)["EventDate"]
-                        .min()
-                        .sort_values()
-                        .reset_index(drop=False)
-                        .reset_index()
-                        .rename(columns={"index": "test_number"})
-                    )
-                    last_test_name = str(last["EventName"])
-                    tn_row = g[g["EventName"] == last_test_name]
-                    test_number = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
+    		    blocks = testing_blocks(df)
 
-                    try:
+    		    last_date = pd.to_datetime(last["EventDate"]).date()
+                    test_number = 1
+                    for i, b in enumerate(blocks, start=1):
+        		if any(d.date() == last_date for d in b):
+            		    test_number = i
+            		    break
+
+    		    try:
                         s = ff1.get_testing_session(int(y), int(test_number), 1)
-                        s.load(telemetry=False, weather=False, messages=False)
-                    except Exception:
-                        pass
+        		s.load(telemetry=False, weather=False, messages=False)
+    	            except Exception:
+        		pass
+
 
                 else:
                     gp = str(last["EventName"])
