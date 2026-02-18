@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 pio.templates.default = 'plotly_white'
 
-from dash import Dash, dcc, html, Input, Output, State, no_update, ALL
+from dash import Dash, dcc, html, Input, Output, State, no_update, ALL, MATCH
 import dash_bootstrap_components as dbc
 
 # ================= Setup & cache =================
