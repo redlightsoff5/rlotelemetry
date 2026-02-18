@@ -246,7 +246,6 @@ def default_event_value(year: int):
         return None
 
     last = past.iloc[-1]
-
     if str(last["EventFormat"]).lower() == "testing":
         testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
         g = (
