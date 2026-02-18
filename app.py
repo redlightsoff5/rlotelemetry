@@ -186,26 +186,28 @@ def get_schedule_df(year:int, date_token:str) -> pd.DataFrame:
     df = df[['RoundNumber','EventName','EventFormat','EventDate']].sort_values(['EventDate','RoundNumber']).reset_index(drop=True)
     return df
 
-def build_gp_options(year:int):
+def build_gp_options(year: int):
     df = get_schedule_df(year, _utc_today_token())
 
-    # Group testing rows by EventName -> each group is a testing "event" (week)
-    testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
+    testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+
     if not testing_df.empty:
-        g = (testing_df.groupby('EventName', dropna=False)['EventDate']
-             .agg(['min','max'])
-             .reset_index()
-             .sort_values('min')
-             .reset_index(drop=True))
-        test_number_map = {row['EventName']: int(i+1) for i, row in g.iterrows()}
+        g = (
+            testing_df.groupby("EventName", dropna=False)["EventDate"]
+            .agg(["min", "max"])
+            .reset_index()
+            .sort_values("min")
+            .reset_index(drop=True)
+        )
+        test_number_map = {row["EventName"]: int(i + 1) for i, row in g.iterrows()}
     else:
-        g = pd.DataFrame(columns=['EventName','min','max'])
+        g = pd.DataFrame(columns=["EventName", "min", "max"])
         test_number_map = {}
 
     opts = []
     added_tests = set()
 
-    for _, r in df.sort_values(['EventDate','RoundNumber']).iterrows():
+    for _, r in df.sort_values(["EventDate", "RoundNumber"]).iterrows():
         fmt = str(r.EventFormat).lower()
         name = str(r.EventName)
 
@@ -215,10 +217,10 @@ def build_gp_options(year:int):
             if val in added_tests:
                 continue
 
-            row = g[g['EventName'] == name].iloc[0] if not g.empty else None
-            if row is not None:
-                d0 = row['min'].date()
-                d1 = row['max'].date()
+            if not g.empty and (g["EventName"] == name).any():
+                row = g[g["EventName"] == name].iloc[0]
+                d0 = row["min"].date()
+                d1 = row["max"].date()
                 label = f"Pre-Season Testing #{tn} ({d0}–{d1})"
             else:
                 label = f"Pre-Season Testing #{tn}"
@@ -227,33 +229,36 @@ def build_gp_options(year:int):
             added_tests.add(val)
         else:
             date = r.EventDate.date()
-            opts.append({
-                "label": f"R{int(r.RoundNumber)} — {name} ({date})",
-                "value": f"GP|{name}"
-            })
+            opts.append(
+                {
+                    "label": f"R{int(r.RoundNumber)} — {name} ({date})",
+                    "value": f"GP|{name}",
+                }
+            )
 
     return opts
 
-def default_event_value(year:int):
+def default_event_value(year: int):
     df = get_schedule_df(year, _utc_today_token())
     today = pd.Timestamp.utcnow().tz_localize(None)
-    past = df[df['EventDate'] <= today].sort_values('EventDate')
+    past = df[df["EventDate"] <= today].sort_values("EventDate")
     if past.empty:
         return None
 
     last = past.iloc[-1]
-    if str(last['EventFormat']).lower() == 'testing':
-        testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
-        g = (testing_df.groupby('EventName', dropna=False)['EventDate']
-             .min()
-             .sort_values()
-             .reset_index(drop=False)
-             .reset_index()
-             .rename(columns={'index':'test_number'}))
-        # newest testing event
-        last_test_name = str(last['EventName'])
-        tn_row = g[g['EventName'] == last_test_name]
-        tn = int(tn_row['test_number'].iloc[0]) + 1 if not tn_row.empty else 1
+    if str(last["EventFormat"]).lower() == "testing":
+        testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
+        g = (
+            testing_df.groupby("EventName", dropna=False)["EventDate"]
+            .min()
+            .sort_values()
+            .reset_index(drop=False)
+            .reset_index()
+            .rename(columns={"index": "test_number"})
+        )
+        last_test_name = str(last["EventName"])
+        tn_row = g[g["EventName"] == last_test_name]
+        tn = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
         return f"TEST|{tn}"
 
     return f"GP|{str(last['EventName'])}"
@@ -694,7 +699,15 @@ def load_session_meta(year, event_value, sess_code):
         return no_update, [], {}
     try:
         ses = load_session_laps(int(year), str(event_value), str(sess_code))
-        laps = ses.laps.dropna(subset=['LapTime'])
+        try:
+            laps = ses.laps.dropna(subset=["LapTime"])
+        except ff1.exceptions.DataNotLoadedError:
+            # one forced reload in case FastF1 returned an unloaded session object
+            try:
+                ses.load(laps=True, telemetry=False, weather=False, messages=False)
+                laps = ses.laps.dropna(subset=["LapTime"])
+            except Exception:
+                raise
         drivers = sorted(laps['Driver'].dropna().unique().tolist())
         colors = driver_team_color_map(ses)
         return {'year': int(year), 'event': str(event_value), 'sess': str(sess_code)}, drivers, colors
