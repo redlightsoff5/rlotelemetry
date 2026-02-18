@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 pio.templates.default = 'plotly_white'
 
-from dash import Dash, dcc, html, Input, Output, State, no_update, ALL
+from dash import Dash, dcc, html, Input, Output, State, no_update, ALL, MATCH
 import dash_bootstrap_components as dbc
 
 # ================= Setup & cache =================
@@ -379,6 +379,85 @@ def speed_records_df(ses):
         rows.append({'Driver': r['Driver'], 'Trap (km/h)': vmax})
     return pd.DataFrame(rows)
 
+def export_df_for_chart(chart_key: str, ses, selected_drivers):
+    """
+    Returns a dataframe representing what the chart plots.
+    Keep it deterministic: same filters as the chart.
+    """
+    selected_drivers = selected_drivers or []
+
+    if chart_key == "gap":
+        df = gap_to_leader_df(ses)
+        if selected_drivers:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    if chart_key == "lc":
+        laps = ses.laps[['Driver','LapNumber','Position']].dropna()
+        if selected_drivers:
+            laps = laps[laps["Driver"].isin(selected_drivers)]
+        return laps
+
+    if chart_key == "ep":
+        df = pace_df(ses)
+        if selected_drivers:
+            df = df[df["Driver"].isin(selected_drivers)]
+        if not df.empty:
+            df = df.sort_values(['Driver','LapNumber'])
+            df["MA3"] = df.groupby("Driver", dropna=False)["LapSeconds"].transform(
+                lambda s: s.rolling(3, min_periods=1).mean()
+            )
+        return df
+
+    if chart_key == "pos":
+        df = positions_gained_df(ses)
+        if selected_drivers and not df.empty:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    if chart_key == "ty":
+        df = tyre_stints_df(ses)
+        if selected_drivers:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    if chart_key == "pace":
+        df = pace_df(ses)
+        if selected_drivers:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    if chart_key == "best":
+        laps = ses.laps.dropna(subset=['LapTime'])
+        if selected_drivers:
+            laps = laps[laps["Driver"].isin(selected_drivers)]
+        if laps.empty:
+            return pd.DataFrame()
+        best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
+        best['Best_s'] = best['LapTime'].dt.total_seconds()
+        best['BestStr'] = best['Best_s'].apply(s_to_mssmmm)
+        return best[['Driver','LapNumber','Best_s','BestStr']]
+
+    if chart_key == "sec":
+        df = sector_records_df(ses)
+        if selected_drivers and not df.empty:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    if chart_key == "spd":
+        df = speed_records_df(ses)
+        if selected_drivers and not df.empty:
+            df = df[df["Driver"].isin(selected_drivers)]
+        return df
+
+    # Telemetry charts (only if you add that telemetry tab later)
+    # Example keys from earlier: tel_spd, tel_ctl, tel_gr, tel_map
+    if chart_key in {"tel_spd", "tel_ctl", "tel_gr", "tel_map"}:
+        # you will need your telemetry loader + fastest lap extractor
+        return pd.DataFrame()
+
+    return pd.DataFrame()
+
 # ================= Dash =================
 external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
@@ -457,7 +536,22 @@ def header_controls():
 def graph_box(graph_id: str, title: str, chart_key: str):
     return html.Div(className="box", children=[
         dbc.Row([
-            dbc.Col(html.H5(title, className="m-0"), md=6, style={"display":"flex","alignItems":"center"}),
+            dbc.Col(
+                html.Div([
+                    html.H5(title, className="m-0", style={"display":"inline-block", "marginRight":"10px"}),
+                    dbc.Button(
+                        "CSV",
+                        id={"role": "csv", "chart": chart_key},
+                        n_clicks=0,
+                        size="sm",
+                        outline=True,
+                        color="secondary",
+                        style={"padding":"2px 10px"}
+                    ),
+                    dcc.Download(id={"role":"csv-dl", "chart": chart_key}),
+                ], style={"display":"flex", "alignItems":"center", "gap":"8px"}),
+                md=6
+            ),
             dbc.Col([
                 dcc.Dropdown(
                     id={"role": "drv", "chart": chart_key},
@@ -468,6 +562,7 @@ def graph_box(graph_id: str, title: str, chart_key: str):
                 )
             ], md=6),
         ], className="g-2 align-items-center"),
+
         dcc.Loading(
             dcc.Graph(
                 id=graph_id,
@@ -803,6 +898,41 @@ def chart_speeds(data, selected):
     f.update_traces(marker_line_width=0)
     f.update_layout(yaxis_title="km/h")
     return polish(f)
+
+@app.callback(
+    Output({"role":"csv-dl", "chart": MATCH}, "data"),
+    Input({"role":"csv", "chart": MATCH}, "n_clicks"),
+    State({"role":"csv", "chart": MATCH}, "id"),
+    State("store", "data"),
+    State({"role":"drv", "chart": MATCH}, "value"),
+    prevent_initial_call=True
+)
+def download_chart_csv(n_clicks, btn_id, store_data, selected):
+    if not n_clicks:
+        return no_update
+    if not store_data:
+        return no_update
+
+    chart_key = btn_id.get("chart")
+    try:
+        ses = load_session_laps(int(store_data.get('year', 2025)), store_data['event'], store_data['sess'])
+        df = export_df_for_chart(chart_key, ses, selected)
+
+        if df is None or df.empty:
+            # still return a valid CSV with headers if you want; here we just no-op
+            return no_update
+
+        # filename that helps you track what it is
+        safe_event = str(store_data["event"]).replace("|", "_").replace(" ", "_")
+        safe_sess = str(store_data["sess"])
+        fname = f"{chart_key}_{store_data.get('year', 0)}_{safe_event}_{safe_sess}.csv"
+
+        return dcc.send_data_frame(df.to_csv, fname, index=False)
+
+    except Exception:
+        traceback.print_exc()
+        return no_update
+
 
 # ================= Run =================
 server = app.server
