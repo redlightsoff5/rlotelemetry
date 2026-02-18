@@ -233,11 +233,12 @@ def build_gp_options(year: int):
 def default_event_value(year: int):
     df = get_schedule_df(year, _utc_today_token())
     today = pd.Timestamp.utcnow().tz_localize(None)
+
     past = df[df["EventDate"] <= today].sort_values("EventDate")
     if past.empty:
         return None
 
-        last = past.iloc[-1]
+    last = past.iloc[-1]
 
     if str(last["EventFormat"]).lower() == "testing":
         blocks = testing_blocks(df)
@@ -250,23 +251,8 @@ def default_event_value(year: int):
                 return f"TEST|{i}"
         return "TEST|1"
 
-
-
-        testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-        g = (
-            testing_df.groupby("EventName", dropna=False)["EventDate"]
-            .min()
-            .sort_values()
-            .reset_index(drop=False)
-            .reset_index()
-            .rename(columns={"index": "test_number"})
-        )
-        last_test_name = str(last["EventName"])
-        tn_row = g[g["EventName"] == last_test_name]
-        tn = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
-        return f"TEST|{tn}"
-
     return f"GP|{str(last['EventName'])}"
+
 
 SESSION_OPTIONS = [
     {"label": "FP1",               "value": "FP1"},
