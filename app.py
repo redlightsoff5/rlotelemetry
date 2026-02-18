@@ -1001,7 +1001,7 @@ def warmup():
                 if str(last["EventFormat"]).lower() == "testing":
                     # pick test_number by date order
                     testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-	            g = (testing_df.groupby('EventName', dropna=False)['EventDate']
+                g = (testing_df.groupby('EventName', dropna=False)['EventDate']
                          .min()
                          .sort_values()
                          .reset_index(drop=False)
