@@ -990,44 +990,52 @@ def warmup():
     # Warmup schedule + try loading last past session/test for allowed years
     try:
         now = pd.Timestamp.utcnow().tz_localize(None)
+
         for y in YEARS_ALLOWED:
             try:
-                df = get_schedule_df(y, _utc_today_token())
+                df = get_schedule_df(int(y), _utc_today_token())
                 past = df[df["EventDate"] <= now].sort_values("EventDate")
                 if past.empty:
                     continue
+
                 last = past.iloc[-1]
 
                 if str(last["EventFormat"]).lower() == "testing":
-                    # pick test_number by date order
+                    # Determine testing event number by EventName group order (wk1=1, wk2=2, ...)
                     testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
-                g = (testing_df.groupby('EventName', dropna=False)['EventDate']
-                         .min()
-                         .sort_values()
-                         .reset_index(drop=False)
-                         .reset_index()
-                         .rename(columns={'index':'test_number'}))
+                    g = (
+                        testing_df.groupby("EventName", dropna=False)["EventDate"]
+                        .min()
+                        .sort_values()
+                        .reset_index(drop=False)
+                        .reset_index()
+                        .rename(columns={"index": "test_number"})
+                    )
                     last_test_name = str(last["EventName"])
-                    tn_row = g[g['EventName'] == last_test_name]
-                    test_number = int(tn_row['test_number'].iloc[0]) + 1 if not tn_row.empty else 1
+                    tn_row = g[g["EventName"] == last_test_name]
+                    test_number = int(tn_row["test_number"].iloc[0]) + 1 if not tn_row.empty else 1
 
                     try:
-                        s = ff1.get_testing_session(y, test_number, 1)
+                        s = ff1.get_testing_session(int(y), int(test_number), 1)
                         s.load(telemetry=False, weather=False, messages=False)
                     except Exception:
                         pass
+
                 else:
                     gp = str(last["EventName"])
                     for sess_name in ("R", "Q"):
                         try:
-                            s = ff1.get_session(y, gp, sess_name)
+                            s = ff1.get_session(int(y), gp, sess_name)
                             s.load(telemetry=False, weather=False, messages=False)
                             break
                         except Exception:
                             continue
+
             except Exception:
                 continue
+
         return jsonify(status="warmed")
+
     except Exception as e:
         return jsonify(status="error", detail=str(e)), 500
 
