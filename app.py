@@ -237,18 +237,20 @@ def default_event_value(year: int):
     if past.empty:
         return None
 
-    last = past.iloc[-1]
-        if str(last["EventFormat"]).lower() == "testing":
+        last = past.iloc[-1]
+
+    if str(last["EventFormat"]).lower() == "testing":
         blocks = testing_blocks(df)
         if not blocks:
             return "TEST|1"
 
         last_date = pd.to_datetime(last["EventDate"]).date()
-        # find which block contains last_date
         for i, b in enumerate(blocks, start=1):
             if any(d.date() == last_date for d in b):
                 return f"TEST|{i}"
         return "TEST|1"
+
+
 
         testing_df = df[df["EventFormat"] == "testing"].sort_values("EventDate")
         g = (
