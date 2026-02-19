@@ -279,65 +279,6 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
     ses.load(laps=True, telemetry=False, weather=False, messages=False)
     return ses
 
-# ---------- Loaders (telemetry) ----------
-@lru_cache(maxsize=32)
-def load_session_telemetry(year:int, event_value:str, sess_code:str):
-    """
-    Same as load_session_laps, but loads telemetry=True.
-    Cached separately so we don't change behavior/perf of existing tabs.
-    """
-    event_value = str(event_value)
-    sess_code = str(sess_code).upper()
-
-    kind, payload = event_value.split("|", 1)
-
-    if kind == "TEST":
-        test_number = int(payload)
-        day_number = int(sess_code.replace("T", ""))  # T1->1
-        ses = ff1.get_testing_session(int(year), test_number, day_number)
-        ses.load(laps=True, telemetry=True, weather=False, messages=False)
-        return ses
-
-    event_name = payload
-    try:
-        ses = ff1.get_session(int(year), event_name, sess_code)
-    except Exception:
-        if sess_code == "SQ":
-            ses = ff1.get_session(int(year), event_name, "SS")
-        else:
-            raise
-    ses.load(laps=True, telemetry=True, weather=False, messages=False)
-    return ses
-
-
-def fastest_lap_car_data(ses, driver: str) -> pd.DataFrame:
-    """
-    Returns car data (with Distance) for the driver's fastest lap in the loaded session.
-    Uses get_car_data() which includes: Speed, RPM, nGear, Throttle, Brake, etc.
-    """
-    laps = ses.laps.dropna(subset=['LapTime'])
-    laps = laps[laps['Driver'] == driver]
-    if laps.empty:
-        return pd.DataFrame()
-
-    lap = laps.loc[laps['LapTime'].idxmin()]
-    try:
-        cd = lap.get_car_data().add_distance()
-    except Exception:
-        return pd.DataFrame()
-
-    if cd is None or cd.empty:
-        return pd.DataFrame()
-
-    cd = cd.reset_index(drop=True)
-    # standardize expected columns
-    for col in ["Distance", "Speed", "RPM", "nGear", "Throttle", "Brake"]:
-        if col not in cd.columns:
-            cd[col] = np.nan
-    cd["Driver"] = driver
-    return cd
-
-
 # ---------- Builders ----------
 def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].copy() if hasattr(ses, "laps") else pd.DataFrame()
@@ -509,15 +450,6 @@ def export_df_for_chart(chart_key: str, ses, selected_drivers):
             df = df[df["Driver"].isin(selected_drivers)]
         return df
 
-    # Telemetry charts (only if you add that telemetry tab later)
-    # Example keys from earlier: tel_spd, tel_ctl, tel_gr, tel_map
-    if chart_key in {"tel_spd", "tel_ctl", "tel_gr", "tel_map"}:
-        # you will need your telemetry loader + fastest lap extractor
-        return pd.DataFrame()
-
-    return pd.DataFrame()
-
-
 # ================= Dash =================
 external_stylesheets=[dbc.themes.FLATLY]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
@@ -663,18 +595,6 @@ def tab_records():
 def tab_speeds():
     return html.Div([ graph_box('speeds','Speed Metrics','spd') ])
 
-def tab_telemetry():
-    return html.Div([
-        dbc.Row([
-            dbc.Col(graph_box('tel-speed',    'Speed vs Distance (fastest lap)',       'tel_spd'), md=6),
-            dbc.Col(graph_box('tel-controls', 'Throttle & Brake vs Distance (fastest lap)', 'tel_ctl'), md=6),
-        ], className="g-2"),
-        dbc.Row([
-            dbc.Col(graph_box('tel-gear',     'Gear vs RPM (fastest lap)',             'tel_gr'), md=6),
-            dbc.Col(graph_box('tel-map',      'Track Map (colored by Speed)',         'tel_map'), md=6),
-        ], className="g-2 mt-1"),
-    ])
-
 app.layout = dbc.Container([
     header_controls(),
     dcc.Tabs(
@@ -688,7 +608,6 @@ app.layout = dbc.Container([
             dcc.Tab(label="Pace", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Records", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Speeds", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
-	    dcc.Tab(label="Telemetry", value="telemetry", className="rlo-tab", selected_className="rlo-tab--selected"),	
         ],
     ),
     html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
@@ -700,7 +619,7 @@ app.layout = dbc.Container([
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
     return {"evo":tab_evolution, "tyres":tab_tyres, "pace":tab_pace,
-            "records":tab_records, "speeds":tab_speeds, "telemetry":tab_telemetry}.get(val, tab_evolution)()
+            "records":tab_records, "speeds":tab_speeds}.get(val, tab_evolution)()
 
 # NEW: Session dropdown changes depending on whether event is TEST or GP
 @app.callback(
@@ -971,229 +890,6 @@ def chart_speeds(data, selected):
     f.update_traces(marker_line_width=0)
     f.update_layout(yaxis_title="km/h")
     return polish(f)
-
-#---------- Telemetry ----------
-@app.callback(
-    Output('tel-speed','figure'),
-    Input('store','data'),
-    Input({'role':'drv','chart':'tel_spd'}, 'value'),
-    State('team-color-store','data')
-)
-def chart_tel_speed(data, selected, color_map):
-    if not data: 
-        return fig_empty("(no data)")
-    selected = selected or []
-    if not selected:
-        return fig_empty("Speed vs Distance — select drivers")
-
-    try:
-        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        f = go.Figure()
-        any_trace = False
-
-        for drv in selected:
-            cd = fastest_lap_car_data(ses, drv)
-            if cd.empty: 
-                continue
-            any_trace = True
-            f.add_trace(go.Scatter(
-                x=cd["Distance"], y=cd["Speed"],
-                mode="lines", name=str(drv),
-                hovertemplate=f"{drv}<br>Dist %{x:.0f} m<br>Speed %{y:.1f} km/h<extra></extra>"
-            ))
-
-        if not any_trace:
-            return fig_empty("Speed vs Distance — no telemetry")
-
-        f.update_layout(title="Speed vs Distance (fastest lap)")
-        f.update_xaxes(title="Distance (m)")
-        f.update_yaxes(title="Speed (km/h)")
-        return set_trace_color(polish(f), color_map)
-
-    except Exception:
-        traceback.print_exc()
-        return fig_empty("Speed vs Distance — error")
-
-@app.callback(
-    Output('tel-controls','figure'),
-    Input('store','data'),
-    Input({'role':'drv','chart':'tel_ctl'}, 'value'),
-    State('team-color-store','data')
-)
-def chart_tel_controls(data, selected, color_map):
-    if not data:
-        return fig_empty("(no data)")
-    selected = selected or []
-    if not selected:
-        return fig_empty("Throttle & Brake — select drivers")
-
-    try:
-        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        f = go.Figure()
-        any_trace = False
-
-        for drv in selected:
-            cd = fastest_lap_car_data(ses, drv)
-            if cd.empty:
-                continue
-
-            # Brake can be bool; show as 0/100
-            brk = cd["Brake"]
-            if brk.dtype == bool or str(brk.dtype).lower() == "bool":
-                brk = brk.astype(int) * 100
-            else:
-                # if already 0/1 or 0/100-ish, clamp to [0,100] for display
-                brk = pd.to_numeric(brk, errors="coerce").fillna(0).clip(0, 100)
-
-            thr = pd.to_numeric(cd["Throttle"], errors="coerce").fillna(0).clip(0, 100)
-
-            any_trace = True
-            f.add_trace(go.Scatter(
-                x=cd["Distance"], y=thr,
-                mode="lines", name=f"{drv} — Throttle",
-                hovertemplate=f"{drv} Throttle<br>Dist %{x:.0f} m<br>%{{y:.0f}}%<extra></extra>"
-            ))
-            f.add_trace(go.Scatter(
-                x=cd["Distance"], y=brk,
-                mode="lines", name=f"{drv} — Brake",
-                line=dict(dash="dot"),
-                hovertemplate=f"{drv} Brake<br>Dist %{x:.0f} m<br>%{{y:.0f}}%<extra></extra>"
-            ))
-
-        if not any_trace:
-            return fig_empty("Throttle & Brake — no telemetry")
-
-        f.update_layout(title="Throttle & Brake vs Distance (fastest lap)")
-        f.update_xaxes(title="Distance (m)")
-        f.update_yaxes(title="Control (%)", range=[0, 100])
-        return set_trace_color(polish(f), color_map)
-
-    except Exception:
-        traceback.print_exc()
-        return fig_empty("Throttle & Brake — error")
-
-@app.callback(
-    Output('tel-gear','figure'),
-    Input('store','data'),
-    Input({'role':'drv','chart':'tel_gr'}, 'value'),
-    State('team-color-store','data')
-)
-def chart_tel_gear_rpm(data, selected, color_map):
-    if not data:
-        return fig_empty("(no data)")
-    selected = selected or []
-    if not selected:
-        return fig_empty("Gear vs RPM — select drivers")
-
-    try:
-        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        f = go.Figure()
-        any_trace = False
-
-        for drv in selected:
-            cd = fastest_lap_car_data(ses, drv)
-            if cd.empty:
-                continue
-
-            rpm = pd.to_numeric(cd["RPM"], errors="coerce")
-            gear = pd.to_numeric(cd["nGear"], errors="coerce")
-            m = rpm.notna() & gear.notna()
-            if not m.any():
-                continue
-
-            any_trace = True
-            f.add_trace(go.Scatter(
-                x=rpm[m], y=gear[m],
-                mode="markers", name=str(drv),
-                marker=dict(size=4, opacity=0.45),
-                hovertemplate=f"{drv}<br>RPM %{{x:.0f}}<br>Gear %{{y:.0f}}<extra></extra>"
-            ))
-
-        if not any_trace:
-            return fig_empty("Gear vs RPM — no telemetry")
-
-        f.update_layout(title="Gear vs RPM (fastest lap)")
-        f.update_xaxes(title="RPM")
-        f.update_yaxes(title="Gear", dtick=1)
-        return set_trace_color(polish(f), color_map)
-
-    except Exception:
-        traceback.print_exc()
-        return fig_empty("Gear vs RPM — error")
-
-@app.callback(
-    Output('tel-map','figure'),
-    Input('store','data'),
-    Input({'role':'drv','chart':'tel_map'}, 'value')
-)
-def chart_tel_map(data, selected):
-    if not data:
-        return fig_empty("(no data)")
-    selected = selected or []
-    if not selected:
-        return fig_empty("Track Map — select at least 1 driver")
-
-    # pick first selected driver for a clean map
-    drv = selected[0]
-
-    try:
-        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        cd = fastest_lap_car_data(ses, drv)
-        if cd.empty or not {"X", "Y", "Speed"}.issubset(cd.columns):
-            return fig_empty("Track Map — telemetry missing X/Y")
-
-        f = go.Figure(go.Scatter(
-            x=cd["X"], y=cd["Y"],
-            mode="lines",
-            line=dict(width=4),
-            customdata=np.stack([cd["Speed"]], axis=-1),
-            hovertemplate=f"{drv}<br>Speed %{customdata[0]:.1f} km/h<extra></extra>"
-        ))
-        # Color by speed (using line color requires plotly segment tricks; keep it simple & stable)
-        f.update_layout(title=f"Track Map (fastest lap) — {drv}")
-        f.update_xaxes(visible=False)
-        f.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
-        return polish(f)
-
-    except Exception:
-        traceback.print_exc()
-        return fig_empty("Track Map — error")
-
-@app.callback(
-    Output({"role":"csv-dl", "chart": MATCH}, "data"),
-    Input({"role":"csv", "chart": MATCH}, "n_clicks"),
-    State({"role":"csv", "chart": MATCH}, "id"),
-    State("store", "data"),
-    State({"role":"drv", "chart": MATCH}, "value"),
-    prevent_initial_call=True
-)
-def download_chart_csv(n_clicks, btn_id, store_data, selected):
-    if not n_clicks:
-        return no_update
-    if not store_data:
-        return no_update
-
-    chart_key = btn_id.get("chart")
-    try:
-        ses = load_session_laps(int(store_data.get('year', 2025)), store_data['event'], store_data['sess'])
-        df = export_df_for_chart(chart_key, ses, selected)
-
-        if df is None or df.empty:
-            # still return a valid CSV with headers if you want; here we just no-op
-            return no_update
-
-        # filename that helps you track what it is
-        safe_event = str(store_data["event"]).replace("|", "_").replace(" ", "_")
-        safe_sess = str(store_data["sess"])
-        fname = f"{chart_key}_{store_data.get('year', 0)}_{safe_event}_{safe_sess}.csv"
-
-        return dcc.send_data_frame(df.to_csv, fname, index=False)
-
-    except Exception:
-        traceback.print_exc()
-        return no_update
-
-
 
 # ================= Run =================
 server = app.server
