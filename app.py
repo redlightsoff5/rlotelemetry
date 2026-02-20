@@ -13,6 +13,7 @@ import plotly.io as pio
 pio.templates.default = 'plotly_white'
 
 from dash import Dash, dcc, html, Input, Output, State, no_update, ALL, MATCH
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 # ================= Setup & cache =================
