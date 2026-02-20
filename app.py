@@ -892,6 +892,44 @@ def chart_speeds(data, selected):
     f.update_layout(yaxis_title="km/h")
     return polish(f)
 
+# ================= CSV download (pattern-matching) =================
+@app.callback(
+    Output({"role": "csv-dl", "chart": MATCH}, "data"),
+    Input({"role": "csv", "chart": MATCH}, "n_clicks"),
+    State({"role": "csv", "chart": MATCH}, "id"),
+    State("store", "data"),
+    State({"role": "drv", "chart": MATCH}, "value"),
+    prevent_initial_call=True,
+)
+def download_chart_csv(n_clicks, btn_id, store_data, selected_drivers):
+    if not n_clicks or not store_data:
+        return no_update
+
+    chart_key = btn_id.get("chart")
+    try:
+        # Carga sesión (laps-only) para exportar datos rápidos
+        ses = load_session_laps(
+            int(store_data.get("year", 2025)),
+            str(store_data["event"]),
+            str(store_data["sess"]),
+        )
+
+        df = export_df_for_chart(chart_key, ses, selected_drivers)
+
+        if df is None:
+            return no_update
+
+        # Si está vacío, aún así devolvemos CSV con headers (mejor UX)
+        safe_event = str(store_data["event"]).replace("|", "_").replace(" ", "_")
+        safe_sess = str(store_data["sess"]).replace(" ", "_")
+        fname = f"{chart_key}_{store_data.get('year', 0)}_{safe_event}_{safe_sess}.csv"
+
+        return dcc.send_data_frame(df.to_csv, fname, index=False)
+
+    except Exception:
+        traceback.print_exc()
+        return no_update
+
 # ================= Run =================
 server = app.server
 from flask import jsonify
