@@ -215,6 +215,41 @@ label, .rlo-filter label{
 *::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.12); border-radius:999px; }
 *::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,0.22); }
 
+/* ---------- Home / hero ---------- */
+.rlo-hero{ padding:20px 4px 12px; }
+.rlo-hero-title{
+  font-weight:900; font-size:34px; letter-spacing:1px; text-transform:uppercase; line-height:1;
+  background:linear-gradient(90deg,#ffffff 0%, #ff5a52 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.rlo-hero-sub{ color:var(--muted); font-size:15px; margin-top:6px; }
+.rlo-kicker{ color:var(--muted); font-size:11px; font-weight:700; letter-spacing:1.2px;
+  text-transform:uppercase; margin-bottom:10px; }
+.rlo-next-event{ font-weight:800; font-size:22px; color:#fff; line-height:1.1; }
+.rlo-next-sub{ color:var(--muted); font-size:13px; margin-top:3px; }
+.rlo-next-when{ color:var(--muted); font-size:12px; margin-top:8px; }
+.rlo-cd{ font-family:"Roboto Mono", ui-monospace, monospace; font-weight:700; font-size:30px;
+  color:var(--red-2); margin-top:12px; letter-spacing:1px; }
+
+/* leaders / podium rows */
+.rlo-leader{ display:flex; align-items:center; gap:10px; padding:7px 0;
+  border-bottom:1px solid var(--border); }
+.rlo-leader:last-child{ border-bottom:none; }
+.rlo-leader-rank{ width:28px; text-align:center; font-weight:800; color:var(--muted); font-size:15px; }
+.rlo-leader-name{ font-weight:700; color:#fff; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }
+.rlo-leader-sub{ color:var(--muted); font-size:11px; }
+.rlo-leader-pts{ font-weight:800; color:#fff; font-family:"Roboto Mono", ui-monospace, monospace; }
+
+/* live banner */
+.rlo-live-banner{ display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:12px;
+  background:rgba(255,255,255,0.04); border:1px solid var(--border); font-weight:700; color:var(--text); }
+.rlo-live-banner.live{ background:rgba(225,6,0,0.14); border-color:rgba(225,6,0,0.5); }
+.rlo-live-dot{ color:var(--red-2); font-weight:800; letter-spacing:.5px; white-space:nowrap; }
+.rlo-live-dot.off{ color:var(--muted); }
+.rlo-live-banner.live .rlo-live-dot{ animation:rlopulse 1.2s infinite; }
+@keyframes rlopulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
 /* ---------- Mobile ---------- */
 @media (max-width:600px){
   .rlo-title{ font-size:17px; }

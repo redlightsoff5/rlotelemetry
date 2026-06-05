@@ -412,6 +412,90 @@ def season_standings(year:int, date_token:str):
     return drv_rows, team_rows
 
 
+# ---------- Schedule helpers (Home & Live tabs) ----------
+SESSION_ES = {
+    "Practice 1": "Libres 1", "Practice 2": "Libres 2", "Practice 3": "Libres 3",
+    "Qualifying": "Clasificación", "Sprint": "Sprint", "Sprint Race": "Sprint",
+    "Sprint Qualifying": "Clasificación Sprint", "Sprint Shootout": "Clasificación Sprint",
+    "Race": "Carrera",
+}
+
+@lru_cache(maxsize=4)
+def get_full_schedule(year:int, date_token:str):
+    return ff1.get_event_schedule(int(year), include_testing=False)
+
+def _naive(ts):
+    ts = pd.Timestamp(ts)
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
+
+def _sessions_of(ev):
+    out = []
+    for i in range(1, 6):
+        name = ev.get(f"Session{i}")
+        dt = ev.get(f"Session{i}DateUtc")
+        if name is None or (isinstance(name, float) and pd.isna(name)) or pd.isna(dt):
+            continue
+        out.append((str(name), _naive(dt)))
+    return out
+
+def next_session_info(year:int, token:str):
+    """Dict for the next upcoming session of the season, or None."""
+    try:
+        df = get_full_schedule(year, token)
+    except Exception:
+        return None
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    best = None
+    for _, ev in df.iterrows():
+        for name, dt in _sessions_of(ev):
+            if dt > now and (best is None or dt < best["utc"]):
+                best = {"event": str(ev["EventName"]),
+                        "location": str(ev.get("Location", "") or ""),
+                        "country": str(ev.get("Country", "") or ""),
+                        "session": SESSION_ES.get(name, name), "utc": dt}
+    return best
+
+def live_session_info(year:int, token:str):
+    """Dict if a session is happening right now (start..start+3h), else None."""
+    try:
+        df = get_full_schedule(year, token)
+    except Exception:
+        return None
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    for _, ev in df.iterrows():
+        for name, dt in _sessions_of(ev):
+            if dt <= now <= dt + pd.Timedelta(hours=3):
+                return {"event": str(ev["EventName"]),
+                        "session": SESSION_ES.get(name, name), "started": dt}
+    return None
+
+def last_race_podium(year:int, token:str):
+    """(event_name, [(pos, abbr, full, team), ...]) for the most recent completed race."""
+    try:
+        sched = get_schedule_df(year, token)
+    except Exception:
+        return None
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    done = sched[(sched["EventFormat"] != "testing") & (sched["EventDate"] <= now)].sort_values("EventDate")
+    for _, ev in done[::-1].iterrows():
+        name = str(ev["EventName"])
+        ses = read_cached_session(int(year), f"GP|{name}", "R")
+        if ses is None:
+            try:
+                ses = load_session_results_only(int(year), f"GP|{name}", "R")
+            except Exception:
+                continue
+        res = getattr(ses, "results", None)
+        if res is None or res.empty or "Position" not in res.columns:
+            continue
+        top = res.sort_values("Position").head(3)
+        podium = [(int(r["Position"]) if pd.notna(r["Position"]) else 0,
+                   str(r.get("Abbreviation") or ""), str(r.get("FullName") or ""),
+                   str(r.get("TeamName") or "")) for _, r in top.iterrows()]
+        return name, podium
+    return None
+
+
 @lru_cache(maxsize=1)
 def load_session_telemetry(year:int, event_value:str, sess_code:str):
     """Heavy loader (telemetry=True). maxsize=1 keeps only ONE session in RAM so
@@ -920,14 +1004,81 @@ def tab_results():
         ], className="g-2"),
     ])
 
+# ---------- Home & Live tabs ----------
+def _leader_row(rank, name, sub, pts, color):
+    return html.Div(className="rlo-leader", children=[
+        html.Span(str(rank), className="rlo-leader-rank"),
+        html.Span(className="rlo-team-bar", style={"background": color, "height": "26px"}),
+        html.Div([html.Div(name, className="rlo-leader-name"),
+                  html.Div(sub, className="rlo-leader-sub")], style={"flex": "1", "minWidth": "0"}),
+        html.Span(pts, className="rlo-leader-pts"),
+    ])
+
+def tab_home():
+    return html.Div([
+        html.Div(className="rlo-hero", children=[
+            html.Div("RLO TELEMETRY", className="rlo-hero-title"),
+            html.Div("Análisis y telemetría de Fórmula 1 — datos al instante, en español.",
+                     className="rlo-hero-sub"),
+        ]),
+        dbc.Row([
+            dbc.Col(html.Div(className="box rlo-next", children=[
+                html.Div("PRÓXIMA SESIÓN", className="rlo-kicker"),
+                dcc.Loading(html.Div(id="home-next"), type="default"),
+            ]), md=5),
+            dbc.Col(html.Div(className="box", children=[
+                html.Div("ÚLTIMO PODIO", className="rlo-kicker"),
+                dcc.Loading(html.Div(id="home-podium"), type="default"),
+            ]), md=7),
+        ], className="g-2"),
+        dbc.Row([
+            dbc.Col(html.Div(className="box", children=[
+                html.Div("LÍDERES — PILOTOS", className="rlo-kicker"),
+                dcc.Loading(html.Div(id="home-drv"), type="default"),
+            ]), md=6),
+            dbc.Col(html.Div(className="box", children=[
+                html.Div("LÍDERES — CONSTRUCTORES", className="rlo-kicker"),
+                dcc.Loading(html.Div(id="home-team"), type="default"),
+            ]), md=6),
+        ], className="g-2 mt-1"),
+        dcc.Store(id="home-target"),
+        dcc.Interval(id="home-cd-int", interval=1000, n_intervals=0),
+    ])
+
+def tab_live():
+    return html.Div([
+        html.Div(id="live-status", className="mb-2"),
+        html.Div(className="box", children=[
+            html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px",
+                            "flexWrap": "wrap", "marginBottom": "10px"}, children=[
+                html.H5("Timing en vivo", className="m-0"),
+                html.A("Abrir F1-Dash ↗", href="https://f1-dash.com", target="_blank",
+                       rel="noopener noreferrer", className="rlo-action rlo-bmc"),
+                html.A("Race Telemetry ↗", href="https://www.racetelemetry.com", target="_blank",
+                       rel="noopener noreferrer", className="rlo-action"),
+                html.A("F1 oficial ↗", href="https://www.formula1.com/en/timing/f1-live",
+                       target="_blank", rel="noopener noreferrer", className="rlo-action"),
+            ]),
+            html.Iframe(src="https://www.f1telemetry.xyz/",
+                        style={"width": "100%", "height": "70vh", "border": "0",
+                               "borderRadius": "12px", "background": "#0c0c12"}),
+            html.Div("El timing en vivo se sirve desde proveedores externos gratuitos. "
+                     "Si no se ve aquí (algunos bloquean la incrustación), usa los botones de "
+                     "arriba — F1-Dash es el más completo.",
+                     className="rlo-note", style={"marginTop": "10px"}),
+        ]),
+    ])
+
 app.layout = dbc.Container([
     header_controls(),
     dcc.Tabs(
         id="tabs",
-        value="evo",
+        value="inicio",
         parent_className="rlo-tabs-parent",
         className="rlo-tabs",
         children=[
+            dcc.Tab(label="Inicio", value="inicio", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="En vivo", value="live", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Evolución", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Ritmo", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Neumáticos", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
@@ -937,7 +1088,7 @@ app.layout = dbc.Container([
             dcc.Tab(label="Resultados", value="results", className="rlo-tab", selected_className="rlo-tab--selected"),
         ],
     ),
-    html.Div(id="tab-body", className="mt-2", children=tab_evolution()),
+    html.Div(id="tab-body", className="mt-2", children=tab_home()),
     dcc.Store(id='store'),
     dcc.Store(id='drivers-store'),
     dcc.Store(id='team-color-store')
@@ -945,9 +1096,9 @@ app.layout = dbc.Container([
 
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
-    return {"evo":tab_evolution, "pace":tab_pace, "tyres":tab_tyres,
-            "tele":tab_telemetry, "records":tab_records, "speeds":tab_speeds,
-            "results":tab_results}.get(val, tab_evolution)()
+    return {"inicio":tab_home, "live":tab_live, "evo":tab_evolution, "pace":tab_pace,
+            "tyres":tab_tyres, "tele":tab_telemetry, "records":tab_records,
+            "speeds":tab_speeds, "results":tab_results}.get(val, tab_home)()
 
 # NEW: Session dropdown changes depending on whether event is TEST or GP
 @app.callback(
@@ -1322,6 +1473,108 @@ def render_results(data, tab):
         traceback.print_exc()
         drivers_tbl = teams_tbl = html.Div("Clasificación no disponible ahora mismo.", className="rlo-note")
     return results_tbl, drivers_tbl, teams_tbl
+
+# ---------- Home & Live content ----------
+@app.callback(
+    Output('home-next', 'children'),
+    Output('home-target', 'data'),
+    Output('home-podium', 'children'),
+    Output('home-drv', 'children'),
+    Output('home-team', 'children'),
+    Input('year-dd', 'value'),
+    Input('tabs', 'value'),
+)
+def render_home(year, tab):
+    if tab != 'inicio':
+        raise PreventUpdate
+    token = _utc_today_token()
+    try:
+        year = int(year)
+    except Exception:
+        year = default_year_value()
+
+    target_ms = None
+    nx = next_session_info(year, token)
+    if nx:
+        target_ms = int(pd.Timestamp(nx['utc']).tz_localize('UTC').timestamp() * 1000)
+        loc = nx['location'] or nx['country']
+        next_div = html.Div([
+            html.Div(nx['event'], className="rlo-next-event"),
+            html.Div(nx['session'] + (f" · {loc}" if loc else ""), className="rlo-next-sub"),
+            html.Div("—:—:—", id="home-cd", className="rlo-cd"),
+            html.Div(nx['utc'].strftime('%d/%m/%Y · %H:%M UTC'), className="rlo-next-when"),
+        ])
+    else:
+        next_div = html.Div("Sin sesiones próximas en el calendario.", className="rlo-note")
+
+    pod = last_race_podium(year, token)
+    if pod:
+        name, podium = pod
+        medals = ['🥇', '🥈', '🥉']
+        podium_div = html.Div(
+            [html.Div(name, className="rlo-next-sub", style={"marginBottom": "8px"})] +
+            [_leader_row(medals[i] if i < 3 else str(i + 1), full or ab, ab, '', _team_color(team))
+             for i, (pos, ab, full, team) in enumerate(podium)])
+    else:
+        podium_div = html.Div("Sin resultados de carrera todavía.", className="rlo-note")
+
+    try:
+        drv_rows, team_rows = season_standings(year, token)
+    except Exception:
+        drv_rows, team_rows = [], []
+    drv_div = (html.Div([_leader_row(i + 1, name, ab, _fmt_pts(pts), _team_color(team))
+                         for i, (ab, name, team, pts) in enumerate(drv_rows[:5])])
+               if drv_rows else html.Div("Aún sin puntos esta temporada.", className="rlo-note"))
+    team_div = (html.Div([_leader_row(i + 1, tm, '', _fmt_pts(pts), _team_color(tm))
+                          for i, (tm, pts) in enumerate(team_rows[:5])])
+                if team_rows else html.Div("Aún sin puntos esta temporada.", className="rlo-note"))
+
+    return next_div, target_ms, podium_div, drv_div, team_div
+
+app.clientside_callback(
+    """
+    function(n, target) {
+        if (!target) { return '—:—:—'; }
+        var diff = Math.floor((target - Date.now())/1000);
+        if (diff <= 0) { return '¡EN PISTA!'; }
+        var d = Math.floor(diff/86400); diff -= d*86400;
+        var h = Math.floor(diff/3600); diff -= h*3600;
+        var m = Math.floor(diff/60); var s = diff - m*60;
+        function p(x){ return ('0'+x).slice(-2); }
+        return (d>0 ? d+'d ' : '') + p(h)+':'+p(m)+':'+p(s);
+    }
+    """,
+    Output('home-cd', 'children'),
+    Input('home-cd-int', 'n_intervals'),
+    State('home-target', 'data'),
+)
+
+@app.callback(
+    Output('live-status', 'children'),
+    Input('year-dd', 'value'),
+    Input('tabs', 'value'),
+)
+def render_live(year, tab):
+    if tab != 'live':
+        raise PreventUpdate
+    token = _utc_today_token()
+    try:
+        year = int(year)
+    except Exception:
+        year = default_year_value()
+    live = live_session_info(year, token)
+    if live:
+        return html.Div(className="rlo-live-banner live", children=[
+            html.Span("● EN VIVO", className="rlo-live-dot"),
+            html.Span(f"{live['session']} — {live['event']}"),
+        ])
+    nx = next_session_info(year, token)
+    if nx:
+        return html.Div(className="rlo-live-banner", children=[
+            html.Span("○ Sin sesión ahora", className="rlo-live-dot off"),
+            html.Span(f"Próxima: {nx['session']} — {nx['event']} · {nx['utc'].strftime('%d/%m %H:%M UTC')}"),
+        ])
+    return html.Div("Sin información de sesiones.", className="rlo-note")
 
 # ================= CSV download (pattern-matching) =================
 @app.callback(
