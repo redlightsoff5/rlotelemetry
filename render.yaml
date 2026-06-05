@@ -1,0 +1,22 @@
+# Render Blueprint (Infrastructure as Code) for RLO Telemetry.
+#
+# This documents the exact, tuned configuration. The most important part is the
+# startCommand: the default gunicorn (1 worker, 1 thread, 30s timeout) is what
+# makes heavy FastF1 loads stall/502. The flags below fix that.
+#
+# To apply: either copy the startCommand into your existing service
+# (Render Dashboard -> your service -> Settings -> Start Command), or set
+# `name:` below to your existing service name and sync this Blueprint.
+
+services:
+  - type: web
+    name: rlo-telemetry
+    runtime: python
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:server --workers 1 --threads 8 --timeout 120 --keep-alive 5 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
