@@ -35,7 +35,7 @@ jobs:
             fastf1-cache-
 
       - name: Install deps
-        run: pip install fastf1==3.8.1 pandas==2.2.3 pyarrow==18.1.0
+        run: pip install fastf1==3.8.3 pandas==2.2.3 pyarrow==18.1.0
 
       - name: Pre-compute sessions
         run: python precompute.py
