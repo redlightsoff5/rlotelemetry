@@ -1,22 +1,33 @@
 name: keep-render-awake
 
-# Render's free plan sleeps the service after ~15 min idle, causing a ~60s
-# cold start for the next visitor. This workflow pings the app every 10 min so
-# it stays warm. Public repo => GitHub Actions minutes are free.
+# GitHub's "*/10" cron is unreliable — it skips/delays runs, so the free Render
+# instance was still falling asleep (~60s cold start). Instead, each run LOOPS
+# internally, pinging every 4 minutes for ~5h45m. Scheduled every 3h so runs
+# overlap/hand off and the app never sleeps.
+# (For a hard guarantee, also add a free external monitor like UptimeRobot.)
 
 on:
   schedule:
-    - cron: "*/10 * * * *"      # every 10 minutes (UTC)
-  workflow_dispatch: {}          # allow manual run from the Actions tab
+    - cron: "23 */3 * * *"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
-      - name: Wake + keep awake (/health)
-        run: curl -fsS --retry 2 --max-time 90 https://telemetry.redlightsoff.com/health || true
-      - name: Pre-warm data (/warmup)
-        run: curl -fsS --max-time 150 https://telemetry.redlightsoff.com/warmup || true
+      - name: Keep Render warm (ping loop)
+        run: |
+          END=$((SECONDS + 20700))   # ~5h45m
+          while [ $SECONDS -lt $END ]; do
+            curl -fsS --max-time 60 https://telemetry.redlightsoff.com/health >/dev/null || true
+            curl -fsS --max-time 90 https://telemetry.redlightsoff.com/warmup >/dev/null || true
+            sleep 240
+          done

@@ -247,6 +247,12 @@ def default_event_value(year:int):
     if past.empty:
         return None
 
+    # Prefer the most recent event we have pre-computed → instant first paint.
+    gp_past = past[past['EventFormat'].astype(str).str.lower() != 'testing']
+    for _, ev in gp_past[::-1].iterrows():
+        if read_cached_session(int(year), f"GP|{ev['EventName']}", 'R') is not None:
+            return f"GP|{str(ev['EventName'])}"
+
     last = past.iloc[-1]
     if str(last['EventFormat']).lower() == 'testing':
         testing_df = df[df['EventFormat'] == 'testing'].sort_values('EventDate')
@@ -369,11 +375,35 @@ def load_session_results_only(year:int, event_value:str, sess_code:str):
     return ses
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def season_standings(year:int, date_token:str):
-    """Cumulative driver & constructor points from every completed Race + Sprint.
-    Uses the official results['Points'] so scoring rules (sprint, fastest lap...)
-    are always correct for that season. Returns (driver_rows, team_rows)."""
+    """Official driver & constructor standings from Ergast/jolpica — ONE fast,
+    authoritative call (correct points, no per-race loading). Falls back to
+    summing cached results only if the API is unavailable."""
+    try:
+        from fastf1.ergast import Ergast
+        erg = Ergast(result_type='pandas', auto_cast=True)
+        ds = erg.get_driver_standings(season=int(year)).content[0]
+        cs = erg.get_constructor_standings(season=int(year)).content[0]
+        drv_rows = []
+        for _, r in ds.iterrows():
+            ab = str(r.get('driverCode') or '').strip()
+            name = (str(r.get('givenName') or '') + ' ' + str(r.get('familyName') or '')).strip()
+            teams = r.get('constructorNames')
+            team = (teams[-1] if isinstance(teams, (list, tuple)) and len(teams) else
+                    (str(teams) if teams is not None and not isinstance(teams, (list, tuple)) else ''))
+            drv_rows.append((ab or name, name or ab, canonical_team(team), float(r.get('points') or 0)))
+        team_rows = [(canonical_team(str(r.get('constructorName') or '')), float(r.get('points') or 0))
+                     for _, r in cs.iterrows()]
+        if drv_rows:
+            return drv_rows, team_rows
+    except Exception:
+        traceback.print_exc()
+    return _season_standings_sum(int(year), date_token)
+
+
+def _season_standings_sum(year:int, date_token:str):
+    """Fallback: sum points from cached/live Race + Sprint results."""
     sched = get_schedule_df(year, date_token)
     today = pd.Timestamp.utcnow().tz_localize(None)
     done = sched[(sched['EventFormat'] != 'testing') & (sched['EventDate'] <= today)].sort_values('EventDate')
