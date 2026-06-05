@@ -1,4 +1,5 @@
-import os, warnings, logging, traceback, glob
+import os, warnings, logging, traceback, glob, json
+from types import SimpleNamespace
 warnings.filterwarnings("ignore")
 logging.getLogger("fastf1").setLevel(logging.WARNING)
 
@@ -21,6 +22,9 @@ APP_DIR = os.path.dirname(__file__)
 CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(APP_DIR, "cache"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 ff1.Cache.enable_cache(CACHE_DIR)
+
+# Pre-computed parquet data (built by precompute.py / GitHub Action)
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(APP_DIR, "data"))
 
 # Years supported in the UI (keep this list tight on purpose)
 YEARS_ALLOWED = [2025, 2026]
@@ -268,6 +272,52 @@ TEST_SESSION_OPTIONS = [
     {"label": "Día 3", "value": "T3"},
 ]
 
+# ---------- Pre-computed data (served instantly; falls back to live FastF1) ----------
+def _slug(name: str) -> str:
+    s = "".join(c.lower() if c.isalnum() else "-" for c in str(name))
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s.strip("-")
+
+class CachedSession:
+    """Minimal stand-in for a FastF1 Session built from pre-computed parquet.
+    Exposes only what the chart builders use: .laps, .results, .name,
+    .session_type and .event.year."""
+    def __init__(self, laps, results, session_type, name, year):
+        self.laps = laps
+        self.results = results if results is not None else pd.DataFrame()
+        self.session_type = session_type
+        self.name = name
+        self.event = SimpleNamespace(year=year)
+
+@lru_cache(maxsize=128)
+def read_cached_session(year:int, event_value:str, sess_code:str):
+    """Build a CachedSession from data/<year>/<slug>/<SESS>.* parquet, or None."""
+    try:
+        kind, payload = str(event_value).split("|", 1)
+    except ValueError:
+        return None
+    if kind != "GP":
+        return None  # testing stays live
+    out_dir = os.path.join(DATA_DIR, str(int(year)), _slug(payload))
+    laps_path = os.path.join(out_dir, f"{sess_code}.laps.parquet")
+    if not os.path.exists(laps_path):
+        return None
+    try:
+        laps = pd.read_parquet(laps_path)
+        res_path = os.path.join(out_dir, f"{sess_code}.results.parquet")
+        results = pd.read_parquet(res_path) if os.path.exists(res_path) else pd.DataFrame()
+        meta = {}
+        meta_path = os.path.join(out_dir, f"{sess_code}.meta.json")
+        if os.path.exists(meta_path):
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+        return CachedSession(laps, results, meta.get("session_type", ""),
+                             meta.get("name", sess_code), int(year))
+    except Exception:
+        traceback.print_exc()
+        return None
+
 # ---------- Loaders ----------
 @lru_cache(maxsize=64)
 def load_session_laps(year:int, event_value:str, sess_code:str):
@@ -281,6 +331,10 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
     """
     event_value = str(event_value)
     sess_code = str(sess_code).upper()
+
+    cached = read_cached_session(int(year), event_value, sess_code)
+    if cached is not None:
+        return cached
 
     kind, payload = event_value.split("|", 1)
 
@@ -328,10 +382,12 @@ def season_standings(year:int, date_token:str):
     for _, ev in done.iterrows():
         name = str(ev['EventName'])
         for code in ('R', 'SR'):                       # race + sprint
-            try:
-                ses = load_session_results_only(int(year), f"GP|{name}", code)
-            except Exception:
-                continue
+            ses = read_cached_session(int(year), f"GP|{name}", code)
+            if ses is None:
+                try:
+                    ses = load_session_results_only(int(year), f"GP|{name}", code)
+                except Exception:
+                    continue
             res = getattr(ses, 'results', None)
             if res is None or res.empty or 'Points' not in res.columns:
                 continue

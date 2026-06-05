@@ -1,0 +1,53 @@
+name: precompute-data
+
+# Builds the parquet files that the app serves so every chart loads instantly.
+# Runs daily and on demand; commits any new/changed data back to the repo,
+# which triggers a Render redeploy with fresh data.
+
+on:
+  schedule:
+    - cron: "30 5 * * *"     # 05:30 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: precompute
+  cancel-in-progress: false
+
+jobs:
+  build-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache FastF1 downloads
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: fastf1-cache-${{ github.run_id }}
+          restore-keys: |
+            fastf1-cache-
+
+      - name: Install deps
+        run: pip install fastf1==3.8.1 pandas==2.2.3 pyarrow==17.0.0
+
+      - name: Pre-compute sessions
+        run: python precompute.py
+
+      - name: Commit & push data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "data: refresh precomputed sessions"
+            git push
+          fi

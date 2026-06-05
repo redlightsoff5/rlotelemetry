@@ -19,5 +19,9 @@ flask_cache/
 *.arrow
 *.feather
 
+# ...but DO commit the pre-computed session data the app serves
+!data/
+!data/**/*.parquet
+
 .vscode/
 .idea/
