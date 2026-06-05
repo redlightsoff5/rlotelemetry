@@ -1367,7 +1367,13 @@ from flask import jsonify
 
 @server.route("/health", methods=["GET"])
 def health():
-    return jsonify(status="ok")
+    n = 0
+    try:
+        for _root, _dirs, files in os.walk(DATA_DIR):
+            n += sum(1 for f in files if f.endswith(".laps.parquet"))
+    except Exception:
+        n = -1
+    return jsonify(status="ok", precomputed_sessions=n)
 
 @server.route("/warmup", methods=["GET"])
 def warmup():
