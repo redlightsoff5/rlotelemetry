@@ -1,14 +1,12 @@
-name: keep-render-awake
+name: keep-awake
 
-# GitHub's "*/10" cron is unreliable — it skips/delays runs, so the free Render
-# instance was still falling asleep (~60s cold start). Instead, each run LOOPS
-# internally, pinging every 4 minutes for ~5h45m. Scheduled every 3h so runs
-# overlap/hand off and the app never sleeps.
-# (For a hard guarantee, also add a free external monitor like UptimeRobot.)
+# Keeps the Hugging Face Space (and the domain, once it points there) warm.
+# HF Spaces sleep after ~48h idle, so this is light: a ping every 10 min inside
+# a long-running job, scheduled every 6h with overlap.
 
 on:
   schedule:
-    - cron: "23 */3 * * *"
+    - cron: "23 */6 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -23,11 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - name: Keep Render warm (ping loop)
+      - name: Ping loop
         run: |
           END=$((SECONDS + 20700))   # ~5h45m
           while [ $SECONDS -lt $END ]; do
-            curl -fsS --max-time 60 https://telemetry.redlightsoff.com/health >/dev/null || true
-            curl -fsS --max-time 90 https://telemetry.redlightsoff.com/warmup >/dev/null || true
-            sleep 240
+            curl -fsS --max-time 60 https://redlightsoff5-rlotelemetry.hf.space/health >/dev/null || true
+            curl -fsS --max-time 60 https://telemetry.redlightsoff.com/health   >/dev/null || true
+            sleep 600
           done
