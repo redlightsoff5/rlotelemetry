@@ -296,7 +296,7 @@ class CachedSession:
         self.name = name
         self.event = SimpleNamespace(year=year)
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=16)
 def read_cached_session(year:int, event_value:str, sess_code:str):
     """Build a CachedSession from data/<year>/<slug>/<SESS>.* parquet, or None."""
     try:
@@ -325,7 +325,7 @@ def read_cached_session(year:int, event_value:str, sess_code:str):
         return None
 
 # ---------- Loaders ----------
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=8)
 def load_session_laps(year:int, event_value:str, sess_code:str):
     """
     event_value:
@@ -364,7 +364,7 @@ def load_session_laps(year:int, event_value:str, sess_code:str):
     return ses
 
 
-@lru_cache(maxsize=96)
+@lru_cache(maxsize=8)
 def load_session_results_only(year:int, event_value:str, sess_code:str):
     """Lighter loader (no laps) used to sum championship points across a season."""
     kind, payload = str(event_value).split("|", 1)
