@@ -1,0 +1,40 @@
+name: deploy-to-hf
+
+# Auto-deploys the app to the Hugging Face Space on every push to main.
+# Handles Git LFS for binaries (parquet/png) automatically, so no manual dance.
+# REQUIRES one repo secret: HF_TOKEN (a Hugging Face *Write* token).
+#   Repo → Settings → Secrets and variables → Actions → New repository secret
+#   Name: HF_TOKEN   Value: <your hf_... write token>
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: hf-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN secret not set yet — add it in Settings → Secrets → Actions. Skipping."
+            exit 0
+          fi
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
+          git lfs install
+          git checkout --orphan hf
+          git lfs track "*.parquet" "*.png" "*.ico"
+          git add -A
+          git commit -m "deploy ${GITHUB_SHA::7}"
+          git lfs migrate import --include="*.parquet,*.png,*.ico" --yes --skip-fetch
+          git push "https://redlightsoff5:${HF_TOKEN}@huggingface.co/spaces/redlightsoff5/rlotelemetry" hf:main --force
+          echo "Deployed to Hugging Face."

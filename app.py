@@ -75,7 +75,8 @@ pio.templates["rlo_dark"] = go.layout.Template(layout=dict(
                tickfont=dict(color=COL_MUTED), title=dict(font=dict(color=COL_MUTED))),
     yaxis=dict(gridcolor=COL_GRID, linecolor=COL_AXIS, zeroline=False,
                tickfont=dict(color=COL_MUTED), title=dict(font=dict(color=COL_MUTED))),
-    legend=dict(font=dict(color=COL_TEXT), bgcolor="rgba(0,0,0,0)"),
+    legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5,
+                font=dict(color=COL_TEXT), bgcolor="rgba(0,0,0,0)"),
     hoverlabel=dict(bgcolor="#1d1d28", bordercolor="rgba(255,255,255,0.16)",
                     font=dict(color="#f4f4f8", family=FONT_FAMILY)),
 ))
@@ -164,7 +165,7 @@ COMMON_LAYOUT = dict(
     paper_bgcolor=COL_PANEL,
     plot_bgcolor=COL_PANEL,
     font=dict(color=COL_TEXT, family=FONT_FAMILY),
-    margin=dict(l=14, r=14, t=54, b=14)
+    margin=dict(l=14, r=14, t=54, b=46)
 )
 
 def brand(fig):
@@ -1237,7 +1238,7 @@ def chart_gap(data, selected, color_map):
     if selected: df = df[df['Driver'].isin(selected)]
     if df.empty: return fig_empty("Diferencia — sin datos")
     if is_race(ses):
-        f = px.line(df, x='LapNumber', y='Gap_s', color='Driver', custom_data=['GapStr'], title='Diferencia con el líder (MM:SS.mmm)')
+        f = px.line(df, x='LapNumber', y='Gap_s', color='Driver', line_shape='spline', custom_data=['GapStr'], title='Diferencia con el líder (MM:SS.mmm)')
         f.update_traces(hovertemplate="%{fullData.name} — Vuelta %{x}<br>%{y:.3f}s (%{customdata[0]})<extra></extra>")
         f.update_yaxes(title="s", tickformat=".3f")
     else:
@@ -1277,7 +1278,7 @@ def chart_evo(data, selected, color_map):
     pdf['MA3'] = pdf.groupby('Driver', dropna=False)['LapSeconds'].transform(lambda s: s.rolling(3, min_periods=1).mean())
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
-        f.add_trace(go.Scatter(x=d['LapNumber'], y=d['MA3'], mode='lines', name=str(drv),
+        f.add_trace(go.Scatter(x=d['LapNumber'], y=d['MA3'], mode='lines', name=str(drv), line=dict(shape='spline', width=2.2),
                                hovertemplate=f"{drv} — Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
     f.update_yaxes(title="s (media 3 vueltas)", tickformat=".3f")
     f.update_layout(title="Evolución del ritmo (media 3 vueltas)")
@@ -1337,7 +1338,7 @@ def chart_pace(data, selected, color_map):
     if pdf.empty: return fig_empty("Ritmo — sin datos de vueltas")
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
-        f.add_trace(go.Scatter(x=d['LapNumber'], y=d['LapSeconds'], mode='lines+markers',
+        f.add_trace(go.Scatter(x=d['LapNumber'], y=d['LapSeconds'], mode='lines+markers', line=dict(width=1.6), marker=dict(size=5),
                                name=str(drv),
                                hovertemplate=f"{drv} — Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
     f.update_yaxes(title="s", tickformat=".3f")
