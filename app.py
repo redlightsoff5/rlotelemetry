@@ -561,6 +561,13 @@ def fastest_lap_telemetry(ses, driver):
     except Exception:
         return None
 
+def circuit_corners(ses):
+    """Corner markers (Number, Distance, X, Y) for the circuit, or None."""
+    try:
+        return ses.get_circuit_info().corners
+    except Exception:
+        return None
+
 # ---------- Builders ----------
 def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].copy() if hasattr(ses, "laps") else pd.DataFrame()
@@ -1006,14 +1013,15 @@ def build_standings_teams(team_rows):
 def tab_telemetry():
     return html.Div([
         html.Div(
-            "📡 La telemetría se descarga bajo demanda (es lo más pesado de la app). "
-            "Elige 1–3 pilotos para comparar su vuelta más rápida. Funciona mejor en "
-            "Clasificación; en carrera la primera carga puede tardar un poco más.",
+            "📡 Telemetría de la vuelta rápida. Para la VELOCIDAD elige 1–3 pilotos; "
+            "para el DELTA y el MAPA DE DOMINANCIA elige exactamente 2. La primera carga "
+            "descarga datos (unos segundos).",
             className="rlo-note"),
+        graph_box('tel-speed', 'Velocidad vs distancia — vuelta rápida (con curvas)', 'tel_spd'),
         dbc.Row([
-            dbc.Col(graph_box('tel-speed', 'Velocidad vs distancia — vuelta rápida', 'tel_spd'), md=7),
-            dbc.Col(graph_box('tel-map', 'Mapa de pista (color = velocidad)', 'tel_map'), md=5),
-        ], className="g-2"),
+            dbc.Col(graph_box('tel-delta', 'Delta de tiempo (2 pilotos)', 'tel_delta'), md=6),
+            dbc.Col(graph_box('tel-map', 'Mapa de dominancia / velocidad', 'tel_map'), md=6),
+        ], className="g-2 mt-2"),
     ])
 
 def tab_results():
@@ -1189,7 +1197,7 @@ def fill_dropdowns(drivers, _children, ids):
     for _id in ids:
         out_opts.append(opts)
         # Telemetry is heavy: start empty so nothing downloads until the user picks.
-        out_val.append([] if _id.get('chart') in ('tel_spd', 'tel_map') else drivers)
+        out_val.append([] if _id.get('chart') in ('tel_spd', 'tel_map', 'tel_delta') else drivers)
     return out_opts, out_val
 
 # ===== Year-driven GP list + guard against future-only seasons =====
@@ -1440,6 +1448,16 @@ def chart_tel_speed(data, selected, tab, color_map):
         drawn = True
     if not drawn:
         return fig_empty("Sin telemetría disponible para esos pilotos")
+    corners = circuit_corners(ses)
+    if corners is not None and 'Distance' in getattr(corners, 'columns', []):
+        for _, cc in corners.iterrows():
+            try:
+                xd = float(cc['Distance'])
+            except Exception:
+                continue
+            f.add_vline(x=xd, line=dict(color='rgba(255,255,255,0.10)', width=1),
+                        annotation_text=f"T{int(cc['Number'])}", annotation_position="top",
+                        annotation_font=dict(size=9, color=COL_MUTED))
     f.update_layout(title="Velocidad vs distancia — vuelta rápida")
     f.update_xaxes(title="Distancia (m)")
     f.update_yaxes(title="km/h")
@@ -1450,29 +1468,93 @@ def chart_tel_speed(data, selected, tab, color_map):
     Input('store', 'data'),
     Input({'role': 'drv', 'chart': 'tel_map'}, 'value'),
     Input('tabs', 'value'),
+    State('team-color-store', 'data'),
 )
-def chart_tel_map(data, selected, tab):
+def chart_tel_map(data, selected, tab, color_map):
     if tab != 'tele' or not data:
         raise PreventUpdate
-    if not selected:
-        return fig_empty("Elige un piloto para el mapa")
-    drv = selected[0]
+    sel = (selected or [])[:2]
+    if not sel:
+        return fig_empty("Elige pilotos (2 = mapa de dominancia)")
     try:
         ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        tel = fastest_lap_telemetry(ses, drv)
     except Exception:
         traceback.print_exc()
         return fig_empty("No se pudo cargar la telemetría")
-    if tel is None or not {'X', 'Y', 'Speed'}.issubset(set(tel.columns)):
-        return fig_empty("Sin datos de posición")
-    f = go.Figure(go.Scatter(
-        x=tel['X'], y=tel['Y'], mode='markers',
-        marker=dict(size=6, color=tel['Speed'], colorscale='Turbo', showscale=True,
-                    colorbar=dict(title="km/h", thickness=12, outlinewidth=0)),
-        hovertemplate="%{marker.color:.0f} km/h<extra></extra>", name=str(drv)))
-    f.update_layout(title=f"Mapa de pista — {drv} (vuelta rápida)")
+    color_map = color_map or {}
+    try:
+        if len(sel) >= 2:
+            a, b = sel[0], sel[1]
+            ta = fastest_lap_telemetry(ses, a)
+            tb = fastest_lap_telemetry(ses, b)
+            if ta is None or tb is None or not {'X', 'Y', 'Speed', 'Distance'}.issubset(ta.columns):
+                return fig_empty("Sin datos de posición")
+            sb = np.interp(ta['Distance'].values, tb['Distance'].values, tb['Speed'].values)
+            a_faster = ta['Speed'].values >= sb
+            ca = color_map.get(a) or '#e10600'
+            cb = color_map.get(b) or '#27F4D2'
+            cols = np.where(a_faster, ca, cb)
+            f = go.Figure(go.Scatter(x=ta['X'], y=ta['Y'], mode='markers',
+                          marker=dict(size=5, color=cols), showlegend=False, hoverinfo='skip'))
+            f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                                   marker=dict(color=ca, size=9), name=f"{a} +rápido"))
+            f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                                   marker=dict(color=cb, size=9), name=f"{b} +rápido"))
+            f.update_layout(title=f"Dominancia — {a} vs {b}")
+        else:
+            drv = sel[0]
+            tel = fastest_lap_telemetry(ses, drv)
+            if tel is None or not {'X', 'Y', 'Speed'}.issubset(set(tel.columns)):
+                return fig_empty("Sin datos de posición")
+            f = go.Figure(go.Scatter(
+                x=tel['X'], y=tel['Y'], mode='markers',
+                marker=dict(size=6, color=tel['Speed'], colorscale='Turbo', showscale=True,
+                            colorbar=dict(title="km/h", thickness=12, outlinewidth=0)),
+                hovertemplate="%{marker.color:.0f} km/h<extra></extra>", name=str(drv)))
+            f.update_layout(title=f"Mapa de pista — {drv}")
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("No se pudo dibujar el mapa")
     f.update_xaxes(visible=False)
     f.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
+    return polish(f)
+
+@app.callback(
+    Output('tel-delta', 'figure'),
+    Input('store', 'data'),
+    Input({'role': 'drv', 'chart': 'tel_delta'}, 'value'),
+    Input('tabs', 'value'),
+    State('team-color-store', 'data'),
+)
+def chart_tel_delta(data, selected, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    sel = (selected or [])[:2]
+    if len(sel) < 2:
+        return fig_empty("Elige 2 pilotos para el delta")
+    a, b = sel[0], sel[1]
+    try:
+        from fastf1.utils import delta_time
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        lap_a = ses.laps.pick_drivers(a).pick_fastest()
+        lap_b = ses.laps.pick_drivers(b).pick_fastest()
+        delta, ref_tel, _ = delta_time(lap_a, lap_b)
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("No se pudo calcular el delta")
+    try:
+        x = ref_tel['Distance']
+    except Exception:
+        x = list(range(len(delta)))
+    cb = (color_map or {}).get(b) or '#27F4D2'
+    f = go.Figure(go.Scatter(x=x, y=delta, mode='lines',
+                  line=dict(color=cb, width=2), fill='tozeroy',
+                  fillcolor='rgba(255,255,255,0.05)',
+                  hovertemplate="%{x:.0f} m<br>Δ %{y:+.3f}s<extra></extra>", name=f"{b} vs {a}"))
+    f.add_hline(y=0, line=dict(color='rgba(255,255,255,0.3)', width=1))
+    f.update_layout(title=f"Delta de tiempo — {b} respecto a {a}  (↑ {b} más lento)")
+    f.update_xaxes(title="Distancia (m)")
+    f.update_yaxes(title="Δ s")
     return polish(f)
 
 # ---------- Results & championship standings ----------
