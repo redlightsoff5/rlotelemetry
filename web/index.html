@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RLO Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;800;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="/v2/echarts.min.js"></script>
+<style>
+:root{
+  --bg:#0b0b0f; --card:#15151e; --card2:#1c1c27; --line:rgba(255,255,255,.07);
+  --line2:rgba(255,255,255,.14); --text:#f4f4f8; --muted:#9aa0ad; --red:#e10600; --red2:#ff2d20;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:
+  radial-gradient(1100px 560px at 82% -12%, rgba(225,6,0,.12), transparent 60%),
+  radial-gradient(900px 520px at -8% -4%, rgba(56,86,168,.10), transparent 55%),
+  linear-gradient(180deg,#0d0d13,#07070b) fixed;
+  color:var(--text);font-family:"Titillium Web",system-ui,Segoe UI,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#ff5a52;text-decoration:none}
+.wrap{max-width:1280px;margin:0 auto;padding:0 14px 60px}
+/* navbar */
+.nav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;padding:12px 22px;
+  background:rgba(12,12,17,.72);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.nav .logo{width:34px;height:34px;border-radius:9px;object-fit:cover;border:1px solid rgba(255,255,255,.2)}
+.nav h1{font-size:20px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;margin:0}
+.nav h1 span{color:var(--red)}
+.nav .sub{color:var(--muted);font-size:12px;font-weight:600}
+.nav .sp{margin-left:auto}
+.nav a.btn{font-size:12.5px;font-weight:700;padding:8px 14px;border-radius:999px;border:1px solid var(--line2);background:rgba(255,255,255,.04);color:var(--text)}
+.nav a.bmc{background:linear-gradient(180deg,#ffe14d,#ffd000);color:#1a1a1a;border:none}
+/* selection */
+.panel{background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin:16px 0}
+.sel{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px}
+@media(max-width:760px){.sel{grid-template-columns:1fr}}
+label{display:block;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px}
+select{width:100%;background:var(--card2);color:var(--text);border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font-family:inherit;font-size:14px;font-weight:600}
+select:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px rgba(225,6,0,.15)}
+/* section title */
+.sec{font-size:20px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin:26px 0 12px;border-left:4px solid var(--red);padding-left:12px}
+.sub2{color:var(--muted);font-size:13px;margin:-6px 0 14px 16px}
+/* summary cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.kpi{background:linear-gradient(180deg,var(--card),#121219);border:1px solid var(--line);border-left:4px solid var(--red);border-radius:14px;padding:14px 16px}
+.kpi .k{color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.kpi .v{font-size:26px;font-weight:800;margin-top:6px;line-height:1}
+.kpi .x{color:var(--muted);font-size:13px;margin-top:4px;font-family:"Roboto Mono",monospace}
+/* card box */
+.box{background:linear-gradient(180deg,var(--card),#121219);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:880px){.grid2{grid-template-columns:1fr}}
+#lapchart{width:100%;height:440px}
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{color:var(--muted);font-size:11px;letter-spacing:.5px;text-transform:uppercase;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line2)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:hover td{background:rgba(255,255,255,.03)}
+.pos{font-weight:800;width:34px}
+.bar{display:inline-block;width:4px;height:18px;border-radius:2px;margin-right:9px;vertical-align:middle}
+.mono{font-family:"Roboto Mono",monospace}
+.muted{color:var(--muted)}
+.tname{font-weight:700}
+.tcode{color:var(--muted);font-size:11px;margin-left:7px}
+.loading{color:var(--muted);padding:20px;text-align:center}
+.tabs{display:inline-flex;gap:4px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:999px;padding:5px;margin:10px 0}
+.tabs button{border:none;background:transparent;color:var(--muted);font-weight:700;text-transform:uppercase;font-size:12.5px;letter-spacing:.3px;padding:8px 16px;border-radius:999px;cursor:pointer;font-family:inherit}
+.tabs button.on{background:linear-gradient(180deg,var(--red2),var(--red));color:#fff}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="nav">
+  <img class="logo" src="/assets/logo.png" alt="">
+  <div>
+    <h1><span>RLO</span> Telemetry</h1>
+    <div class="sub">by @redlightsoff5</div>
+  </div>
+  <span class="sp"></span>
+  <a class="btn" href="https://instagram.com/redlightsoff5" target="_blank" rel="noopener">Instagram</a>
+  <a class="btn bmc" href="https://buymeacoffee.com/redlightsoff5" target="_blank" rel="noopener">Apoyar</a>
+</div>
+
+<div class="wrap">
+  <div class="panel">
+    <div class="sel">
+      <div><label>Año</label><select id="year"></select></div>
+      <div><label>Gran Premio</label><select id="event"></select></div>
+      <div><label>Sesión</label><select id="sess">
+        <option value="R">Carrera</option>
+        <option value="SR">Sprint</option>
+        <option value="Q">Clasificación</option>
+        <option value="SQ">Clasificación Sprint</option>
+        <option value="FP3">Libres 3</option>
+        <option value="FP2">Libres 2</option>
+        <option value="FP1">Libres 1</option>
+      </select></div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button data-tab="analysis" class="on">Análisis de sesión</button>
+    <button data-tab="standings">Campeonato</button>
+  </div>
+
+  <!-- ANALYSIS -->
+  <div id="tab-analysis">
+    <div class="sec">Resumen</div>
+    <div class="sub2" id="ses-title">—</div>
+    <div class="cards" id="kpis"><div class="loading">Cargando…</div></div>
+
+    <div class="sec">Tiempos por vuelta</div>
+    <div class="box"><div id="lapchart"></div></div>
+
+    <div class="sec">Resultado</div>
+    <div class="box"><div id="results"><div class="loading">Cargando…</div></div></div>
+  </div>
+
+  <!-- STANDINGS -->
+  <div id="tab-standings" class="hide">
+    <div class="sec">Campeonato</div>
+    <div class="grid2">
+      <div class="box"><div class="k" style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px">Pilotos</div><div id="st-drivers"><div class="loading">Cargando…</div></div></div>
+      <div class="box"><div class="k" style="color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;margin-bottom:10px">Constructores</div><div id="st-teams"><div class="loading">Cargando…</div></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtLap = s => { if(s==null||isNaN(s)) return ""; const m=Math.floor(s/60), r=(s-m*60); return m+":"+r.toFixed(3).padStart(6,"0"); };
+let chart = null;
+
+async function jget(url){ try{ const r = await fetch(url); return await r.json(); }catch(e){ return null; } }
+
+async function loadSchedule(year){
+  const d = await jget("/api/schedule"+(year?("?year="+year):""));
+  if(!d) return;
+  if(!$("year").options.length){
+    $("year").innerHTML = (d.years||[]).map(y=>`<option value="${y}">${y}</option>`).join("");
+    $("year").value = d.year;
+  }
+  $("event").innerHTML = (d.events||[]).map(e=>`<option value="${e.value}">${e.label}</option>`).join("");
+  if(d.default_event) $("event").value = d.default_event;
+  loadSession();
+  loadStandings();
+}
+
+const KPIS = [
+  ["fastest","Más rápido", v=>v.driver, v=>v.time+" · v"+v.lap],
+  ["consistent","Más constante", v=>v.driver, v=>"σ "+v.std+"s"],
+  ["topspeed","Top velocidad", v=>v.driver, v=>v.kmh+" km/h"],
+  ["mover","Mayor remontada", v=>v.driver, v=>"+"+v.gain+" pos"],
+  ["winner","Ganador", v=>v.driver, v=>v.name||""],
+];
+
+function renderKpis(sum){
+  if(!sum || !Object.keys(sum).length){ $("kpis").innerHTML='<div class="loading">Sin datos</div>'; return; }
+  let h="";
+  for(const [key,title,big,small] of KPIS){
+    if(!sum[key]) continue;
+    h+=`<div class="kpi"><div class="k">${title}</div><div class="v">${big(sum[key])}</div><div class="x">${small(sum[key])}</div></div>`;
+  }
+  if(sum.sectors){
+    const s=sum.sectors;
+    h+=`<div class="kpi"><div class="k">Mejores sectores</div><div class="v" style="font-size:16px;line-height:1.5">${["S1","S2","S3"].filter(k=>s[k]).map(k=>k+" "+s[k].driver).join(" · ")}</div><div class="x">${["S1","S2","S3"].filter(k=>s[k]).map(k=>s[k].time.toFixed(3)).join(" / ")}</div></div>`;
+  }
+  $("kpis").innerHTML = h || '<div class="loading">Sin datos</div>';
+}
+
+function renderLapChart(laps, colors){
+  if(!chart) chart = echarts.init($("lapchart"), null, {renderer:"canvas"});
+  if(!laps || !laps.length){ chart.clear(); return; }
+  const byDrv = {};
+  for(const l of laps){ (byDrv[l.d] ||= []).push([l.lap, l.t]); }
+  const allt = laps.map(l=>l.t).sort((a,b)=>a-b);
+  const p = q => allt[Math.min(allt.length-1, Math.floor(q*allt.length))];
+  const lo = Math.floor(allt[0]-0.4), hi = Math.ceil(p(0.92)+0.6);
+  const series = Object.keys(byDrv).sort().map(d=>({
+    name:d, type:"line", showSymbol:true, symbolSize:5, lineStyle:{width:1.5},
+    itemStyle:{color:colors[d]||"#ccc"}, emphasis:{focus:"series"},
+    data: byDrv[d].sort((a,b)=>a[0]-b[0])
+  }));
+  chart.setOption({
+    backgroundColor:"transparent",
+    textStyle:{fontFamily:"Titillium Web", color:"#f4f4f8"},
+    tooltip:{trigger:"item", backgroundColor:"#1c1c27", borderColor:"rgba(255,255,255,.15)",
+      textStyle:{color:"#f4f4f8"}, formatter:p=>`${p.seriesName} — v${p.data[0]}<br><b>${fmtLap(p.data[1])}</b>`},
+    legend:{type:"scroll", bottom:0, textStyle:{color:"#9aa0ad"}, inactiveColor:"#444"},
+    grid:{left:62,right:18,top:18,bottom:54},
+    xAxis:{type:"value", name:"Vuelta", minInterval:1, axisLine:{lineStyle:{color:"rgba(255,255,255,.2)"}},
+      splitLine:{lineStyle:{color:"rgba(255,255,255,.06)"}}, axisLabel:{color:"#9aa0ad"}},
+    yAxis:{type:"value", min:lo, max:hi, axisLine:{lineStyle:{color:"rgba(255,255,255,.2)"}},
+      splitLine:{lineStyle:{color:"rgba(255,255,255,.06)"}}, axisLabel:{color:"#9aa0ad", formatter:fmtLap}},
+    series
+  }, true);
+}
+
+function renderResults(rows, isRace){
+  if(!rows || !rows.length){ $("results").innerHTML='<div class="loading">Sin resultados</div>'; return; }
+  const quali = rows.some(r=>r.q3||r.q2||r.q1);
+  let head = quali ? `<th class="pos">Pos</th><th>Piloto</th><th>Equipo</th><th>Q1</th><th>Q2</th><th>Q3</th>`
+                   : `<th class="pos">Pos</th><th>Piloto</th><th>Equipo</th><th>${isRace?"Tiempo/Estado":"Mejor vuelta"}</th><th>Pts</th>`;
+  let body = rows.map(r=>{
+    const drv = `<span class="bar" style="background:${r.teamColor}"></span><span class="tname">${r.name}</span><span class="tcode mono">${r.code}</span>`;
+    if(quali) return `<tr><td class="pos">${r.pos??""}</td><td>${drv}</td><td>${r.team}</td><td class="mono">${r.q1}</td><td class="mono">${r.q2}</td><td class="mono">${r.q3}</td></tr>`;
+    return `<tr><td class="pos">${r.pos??""}</td><td>${drv}</td><td>${r.team}</td><td class="mono">${r.time}</td><td class="tname">${r.pts}</td></tr>`;
+  }).join("");
+  $("results").innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+async function loadSession(){
+  const year=$("year").value, event=$("event").value, sess=$("sess").value;
+  if(!event) return;
+  $("ses-title").textContent = `${year} · ${event.replace("GP|","")} · ${$("sess").selectedOptions[0].text}`;
+  $("kpis").innerHTML='<div class="loading">Cargando…</div>';
+  $("results").innerHTML='<div class="loading">Cargando…</div>';
+  const d = await jget(`/api/session?year=${year}&event=${encodeURIComponent(event)}&sess=${sess}`);
+  if(!d || d.error){ $("kpis").innerHTML=`<div class="loading">${(d&&d.error)||"Error"}</div>`; if(chart)chart.clear(); $("results").innerHTML=""; return; }
+  renderKpis(d.summary);
+  renderLapChart(d.laps, d.colors||{});
+  renderResults(d.results, d.isRace);
+}
+
+async function loadStandings(){
+  const year=$("year").value;
+  const d = await jget("/api/standings?year="+year);
+  const dr = (d&&d.drivers)||[], te=(d&&d.teams)||[];
+  $("st-drivers").innerHTML = dr.length ? `<table><tbody>${dr.map(r=>
+    `<tr><td class="pos">${r.pos}</td><td><span class="bar" style="background:${r.teamColor}"></span><span class="tname">${r.name}</span><span class="tcode mono">${r.code}</span></td><td class="muted">${r.team}</td><td class="tname mono">${r.pts}</td></tr>`).join("")}</tbody></table>`
+    : '<div class="loading">Aún sin puntos</div>';
+  $("st-teams").innerHTML = te.length ? `<table><tbody>${te.map(r=>
+    `<tr><td class="pos">${r.pos}</td><td><span class="bar" style="background:${r.teamColor}"></span><span class="tname">${r.team}</span></td><td class="tname mono">${r.pts}</td></tr>`).join("")}</tbody></table>`
+    : '<div class="loading">Aún sin puntos</div>';
+}
+
+// events
+$("year").addEventListener("change", ()=>loadSchedule($("year").value));
+$("event").addEventListener("change", loadSession);
+$("sess").addEventListener("change", loadSession);
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  $("tab-analysis").classList.toggle("hide", b.dataset.tab!=="analysis");
+  $("tab-standings").classList.toggle("hide", b.dataset.tab!=="standings");
+  if(b.dataset.tab==="standings" && chart) setTimeout(()=>chart.resize(),50);
+}));
+window.addEventListener("resize", ()=>chart&&chart.resize());
+loadSchedule();
+</script>
+</body>
+</html>

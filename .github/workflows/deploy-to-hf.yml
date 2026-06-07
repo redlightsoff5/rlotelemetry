@@ -32,9 +32,9 @@ jobs:
           git config user.name "github-actions"
           git lfs install
           git checkout --orphan hf
-          git lfs track "*.parquet" "*.png" "*.ico"
+          git lfs track "*.parquet" "*.png" "*.ico" "*.js"
           git add -A
           git commit -m "deploy ${GITHUB_SHA::7}"
-          git lfs migrate import --include="*.parquet,*.png,*.ico" --yes --skip-fetch
+          git lfs migrate import --include="*.parquet,*.png,*.ico,*.js" --yes --skip-fetch
           git push "https://redlightsoff5:${HF_TOKEN}@huggingface.co/spaces/redlightsoff5/rlotelemetry" hf:main --force
           echo "Deployed to Hugging Face."

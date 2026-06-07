@@ -1727,9 +1727,108 @@ def download_chart_csv(n_clicks, btn_id, store_data, selected_drivers):
         traceback.print_exc()
         return no_update
 
+# ================= Analysis + JSON for the JS frontend =================
+def session_summary(ses, sess_code):
+    """Human-readable insights for a session: fastest, most consistent, top speed,
+    best sectors, biggest mover, winner."""
+    out = {}
+    laps = getattr(ses, 'laps', None)
+    if laps is None or len(laps) == 0:
+        return out
+    laps = laps.dropna(subset=['LapTime']).copy()
+    if laps.empty:
+        return out
+    laps['s'] = laps['LapTime'].dt.total_seconds()
+
+    fr = laps.loc[laps['s'].idxmin()]
+    out['fastest'] = {'driver': str(fr['Driver']), 'time': s_to_mssmmm(fr['s']),
+                      'lap': int(fr['LapNumber'])}
+
+    cons = []
+    for drv, g in laps.groupby('Driver'):
+        gs = g['s']
+        if len(gs) < 5:
+            continue
+        med = gs.median()
+        clean = gs[gs <= med * 1.07]
+        if len(clean) >= 4:
+            cons.append((str(drv), float(clean.std())))
+    cons.sort(key=lambda x: x[1])
+    if cons:
+        out['consistent'] = {'driver': cons[0][0], 'std': round(cons[0][1], 3)}
+
+    spdcols = [c for c in ['SpeedST', 'SpeedFL', 'SpeedI2', 'SpeedI1'] if c in laps.columns]
+    if spdcols and laps[spdcols[0]].notna().any():
+        si = laps[spdcols[0]].idxmax()
+        out['topspeed'] = {'driver': str(laps.loc[si, 'Driver']),
+                           'kmh': round(float(laps.loc[si, spdcols[0]]), 1)}
+
+    sectors = {}
+    for i, c in enumerate(['Sector1Time', 'Sector2Time', 'Sector3Time'], 1):
+        if c in laps.columns and laps[c].notna().any():
+            si = laps[c].idxmin()
+            sectors[f'S{i}'] = {'driver': str(laps.loc[si, 'Driver']),
+                                'time': round(laps.loc[si, c].total_seconds(), 3)}
+    if sectors:
+        out['sectors'] = sectors
+
+    res = getattr(ses, 'results', None)
+    if str(sess_code).upper() in ('R', 'SR') and res is not None and not res.empty \
+            and {'Abbreviation', 'GridPosition', 'Position'}.issubset(res.columns):
+        rr = res.dropna(subset=['Position', 'GridPosition']).copy()
+        if not rr.empty:
+            rr['gain'] = rr['GridPosition'] - rr['Position']
+            mv = rr.sort_values('gain', ascending=False).iloc[0]
+            out['mover'] = {'driver': str(mv['Abbreviation']), 'gain': int(mv['gain'])}
+            win = rr.sort_values('Position').iloc[0]
+            out['winner'] = {'driver': str(win['Abbreviation']),
+                             'name': str(win.get('FullName') or win['Abbreviation'])}
+    return out
+
+
+def build_results_json(ses, sess_code):
+    code = str(sess_code).upper()
+    res = getattr(ses, 'results', None)
+    rows = []
+    if res is not None and not res.empty and 'Abbreviation' in res.columns and 'Position' in res.columns:
+        for _, r in res.sort_values('Position').iterrows():
+            pos = r.get('Position')
+            t = r.get('Time'); status = str(r.get('Status') or '')
+            disp = ''
+            if code in ('R', 'SR'):
+                if pd.notna(t):
+                    disp = _td_str(t, with_hours=True) if (pd.notna(pos) and int(pos) == 1) else '+' + _td_str(t)
+                else:
+                    disp = status
+            rows.append({
+                'pos': (int(pos) if pd.notna(pos) else None),
+                'code': str(r.get('Abbreviation') or ''),
+                'name': str(r.get('FullName') or r.get('Abbreviation') or ''),
+                'team': str(r.get('TeamName') or ''),
+                'teamColor': _team_color(str(r.get('TeamName') or '')),
+                'time': disp,
+                'pts': _fmt_pts(r.get('Points')) if 'Points' in res.columns else '',
+                'q1': _td_str(r.get('Q1')) if 'Q1' in res.columns else '',
+                'q2': _td_str(r.get('Q2')) if 'Q2' in res.columns else '',
+                'q3': _td_str(r.get('Q3')) if 'Q3' in res.columns else '',
+            })
+        return rows
+    laps = ses.laps.dropna(subset=['LapTime']) if hasattr(ses, 'laps') else pd.DataFrame()
+    if laps.empty:
+        return rows
+    best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
+    best['s'] = best['LapTime'].dt.total_seconds()
+    for i, (_, r) in enumerate(best.sort_values('s').iterrows(), 1):
+        team = str(r.get('Team') or '')
+        rows.append({'pos': i, 'code': str(r['Driver']), 'name': str(r['Driver']),
+                     'team': canonical_team(team) or team, 'teamColor': _team_color(team),
+                     'time': s_to_mssmmm(r['s']), 'pts': '', 'q1': '', 'q2': '', 'q3': ''})
+    return rows
+
+
 # ================= Run =================
 server = app.server
-from flask import jsonify
+from flask import jsonify, request, send_from_directory
 
 @server.route("/health", methods=["GET"])
 def health():
@@ -1778,6 +1877,75 @@ def warmup():
         return jsonify(status="warmed")
     except Exception as e:
         return jsonify(status="error", detail=str(e)), 500
+
+# ---------- JSON API for the new JS frontend (/v2) ----------
+WEB_DIR = os.path.join(APP_DIR, "web")
+
+@server.route("/api/schedule")
+def api_schedule():
+    try:
+        year = int(request.args.get("year") or default_year_value())
+    except Exception:
+        year = YEARS_ALLOWED[0]
+    try:
+        opts = build_gp_options(year)
+    except Exception:
+        traceback.print_exc()
+        opts = []
+    return jsonify(years=YEARS_ALLOWED, year=year, events=opts,
+                   default_event=default_event_value(year))
+
+@server.route("/api/session")
+def api_session():
+    try:
+        year = int(request.args.get("year", YEARS_ALLOWED[0]))
+        event = request.args.get("event", "")
+        sess = request.args.get("sess", "R")
+        ses = load_session_laps(year, event, sess)
+    except Exception:
+        traceback.print_exc()
+        return jsonify(error="No se pudo cargar la sesión")
+    try:
+        laps = ses.laps.dropna(subset=['LapTime']).copy()
+        laps['t'] = laps['LapTime'].dt.total_seconds()
+        has_comp = 'Compound' in laps.columns
+        has_pos = 'Position' in laps.columns
+        lap_rows = [{
+            'd': str(r['Driver']), 'lap': int(r['LapNumber']), 't': round(float(r['t']), 3),
+            'comp': (str(r['Compound']).upper() if has_comp and pd.notna(r['Compound']) else None),
+            'pos': (int(r['Position']) if has_pos and pd.notna(r['Position']) else None),
+        } for _, r in laps.iterrows()]
+        drivers = sorted(laps['Driver'].dropna().unique().tolist())
+        return jsonify(laps=lap_rows, drivers=drivers, colors=driver_team_color_map(ses),
+                       summary=session_summary(ses, sess), results=build_results_json(ses, sess),
+                       isRace=is_race(ses))
+    except Exception:
+        traceback.print_exc()
+        return jsonify(error="Error procesando la sesión")
+
+@server.route("/api/standings")
+def api_standings():
+    try:
+        year = int(request.args.get("year", YEARS_ALLOWED[0]))
+        drv, team = season_standings(year, _utc_today_token())
+    except Exception:
+        traceback.print_exc()
+        return jsonify(drivers=[], teams=[])
+    drivers = [{'pos': i + 1, 'code': ab, 'name': name, 'team': tm,
+                'teamColor': _team_color(tm), 'pts': _fmt_pts(pts)}
+               for i, (ab, name, tm, pts) in enumerate(drv)]
+    teams = [{'pos': i + 1, 'team': tm, 'teamColor': _team_color(tm), 'pts': _fmt_pts(pts)}
+             for i, (tm, pts) in enumerate(team)]
+    return jsonify(drivers=drivers, teams=teams)
+
+@server.route("/v2")
+@server.route("/v2/")
+def v2_index():
+    return send_from_directory(WEB_DIR, "index.html")
+
+@server.route("/v2/<path:fname>")
+def v2_static(fname):
+    return send_from_directory(WEB_DIR, fname)
 
 if __name__ == "__main__":
     app.run_server(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
