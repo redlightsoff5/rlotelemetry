@@ -607,6 +607,53 @@ def add_sector_lines(f, d1, d2):
                          borderwidth=1, borderpad=2)
     return f
 
+def tel_card(graph_id, title):
+    return html.Div(className="box mt-2", children=[
+        html.H5(title, className="m-0"),
+        dcc.Loading(dcc.Graph(id=graph_id, figure=fig_empty(title),
+                              config={"displayModeBar": False, "scrollZoom": True},
+                              style={"height": "330px"}), type="default"),
+    ])
+
+def _tel_load(data):
+    return load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+
+def tel_channel_fig(ses, drivers, color_map, ycol, ytitle, transform=None, step=False):
+    """Generic multi-driver telemetry channel vs distance (f1insightshub style)."""
+    drivers = (drivers or [])[:4]
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    color_map = color_map or {}
+    f = go.Figure()
+    drawn = False
+    d1 = d2 = None
+    shape = 'hv' if step else 'linear'
+    for drv in drivers:
+        lap, tel = fastest_lap_full(ses, drv)
+        if tel is None or ycol not in tel.columns or 'Distance' not in tel.columns:
+            continue
+        if d1 is None:
+            d1, d2 = sector_distances(lap, tel)
+        y = tel[ycol]
+        if transform is not None:
+            try:
+                y = transform(y)
+            except Exception:
+                pass
+        c = color_map.get(drv)
+        f.add_trace(go.Scatter(x=tel['Distance'], y=y, mode='lines',
+                    name=f"{drv} — {lap_time_str(lap)}",
+                    line=dict(color=c, width=1.6, shape=shape) if c else dict(width=1.6, shape=shape),
+                    hovertemplate=f"{drv} — %{{x:.0f}} m<br>%{{y}}<extra></extra>"))
+        drawn = True
+    if not drawn:
+        return fig_empty("Sin datos para esos pilotos")
+    add_sector_lines(f, d1, d2)
+    f.update_xaxes(title="Distancia (m)")
+    f.update_yaxes(title=ytitle)
+    f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+    return polish(f)
+
 # ---------- Builders ----------
 def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].copy() if hasattr(ses, "laps") else pd.DataFrame()
@@ -1052,14 +1099,23 @@ def build_standings_teams(team_rows):
 def tab_telemetry():
     return html.Div([
         html.Div(
-            "📡 Telemetría de la vuelta rápida. Para la VELOCIDAD elige 1–3 pilotos; "
-            "para el DELTA y el MAPA DE DOMINANCIA elige exactamente 2. La primera carga "
-            "descarga datos (unos segundos).",
+            "📡 Telemetría de la vuelta rápida. Elige 1–4 pilotos (para Delta y Dominancia, 2). "
+            "La primera carga descarga datos (unos segundos).",
             className="rlo-note"),
-        graph_box('tel-speed', 'Velocidad vs distancia', 'tel_spd'),
-        html.Div(graph_box('tel-delta', 'Delta de tiempo (elige 2 pilotos)', 'tel_delta'), className="mt-2"),
-        html.Div(graph_box('tel-accel', 'Aceleración longitudinal (g)', 'tel_accel'), className="mt-2"),
-        html.Div(graph_box('tel-map', 'Mapa de dominancia (elige 2 pilotos)', 'tel_map'), className="mt-2"),
+        html.Div(className="box", children=[
+            dbc.Label("Pilotos"),
+            dcc.Dropdown(id='tel-drivers', multi=True, options=[], value=[],
+                         placeholder="Elige pilotos…"),
+        ]),
+        tel_card('tel-speed', 'Velocidad (km/h)'),
+        tel_card('tel-delta', 'Delta de tiempo (elige 2)'),
+        tel_card('tel-throttle', 'Acelerador (%)'),
+        tel_card('tel-brake', 'Freno (%)'),
+        tel_card('tel-accel', 'Aceleración longitudinal (g)'),
+        tel_card('tel-gear', 'Marcha'),
+        tel_card('tel-rpm', 'RPM'),
+        tel_card('tel-drs', 'DRS (1 = abierto)'),
+        tel_card('tel-map', 'Mapa de dominancia (elige 2)'),
     ])
 
 def tab_results():
@@ -1235,8 +1291,16 @@ def fill_dropdowns(drivers, _children, ids):
     for _id in ids:
         out_opts.append(opts)
         # Telemetry is heavy: start empty so nothing downloads until the user picks.
-        out_val.append([] if _id.get('chart') in ('tel_spd', 'tel_map', 'tel_delta', 'tel_accel') else drivers)
+        out_val.append(drivers)
     return out_opts, out_val
+
+@app.callback(
+    Output('tel-drivers', 'options'),
+    Input('drivers-store', 'data'),
+    Input('tab-body', 'children'),
+)
+def fill_tel_drivers(drivers, _children):
+    return [{'label': d, 'value': d} for d in (drivers or [])]
 
 # ===== Year-driven GP list + guard against future-only seasons =====
 @app.callback(
@@ -1457,7 +1521,7 @@ def chart_speeds(data, selected):
 @app.callback(
     Output('tel-speed', 'figure'),
     Input('store', 'data'),
-    Input({'role': 'drv', 'chart': 'tel_spd'}, 'value'),
+    Input('tel-drivers', 'value'),
     Input('tabs', 'value'),
     State('team-color-store', 'data'),
 )
@@ -1500,7 +1564,7 @@ def chart_tel_speed(data, selected, tab, color_map):
 @app.callback(
     Output('tel-map', 'figure'),
     Input('store', 'data'),
-    Input({'role': 'drv', 'chart': 'tel_map'}, 'value'),
+    Input('tel-drivers', 'value'),
     Input('tabs', 'value'),
     State('team-color-store', 'data'),
 )
@@ -1556,7 +1620,7 @@ def chart_tel_map(data, selected, tab, color_map):
 @app.callback(
     Output('tel-delta', 'figure'),
     Input('store', 'data'),
-    Input({'role': 'drv', 'chart': 'tel_delta'}, 'value'),
+    Input('tel-drivers', 'value'),
     Input('tabs', 'value'),
     State('team-color-store', 'data'),
 )
@@ -1598,7 +1662,7 @@ def chart_tel_delta(data, selected, tab, color_map):
 @app.callback(
     Output('tel-accel', 'figure'),
     Input('store', 'data'),
-    Input({'role': 'drv', 'chart': 'tel_accel'}, 'value'),
+    Input('tel-drivers', 'value'),
     Input('tabs', 'value'),
     State('team-color-store', 'data'),
 )
@@ -1646,6 +1710,73 @@ def chart_tel_accel(data, selected, tab, color_map):
     f.update_yaxes(title="Aceleración long. (g)")
     f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
     return polish(f)
+
+@app.callback(Output('tel-throttle', 'figure'), Input('store', 'data'),
+              Input('tel-drivers', 'value'), Input('tabs', 'value'), State('team-color-store', 'data'))
+def chart_tel_throttle(data, drivers, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    try:
+        ses = _tel_load(data)
+    except Exception:
+        traceback.print_exc(); return fig_empty("No se pudo cargar la telemetría")
+    return tel_channel_fig(ses, drivers, color_map, 'Throttle', 'Acelerador (%)')
+
+@app.callback(Output('tel-brake', 'figure'), Input('store', 'data'),
+              Input('tel-drivers', 'value'), Input('tabs', 'value'), State('team-color-store', 'data'))
+def chart_tel_brake(data, drivers, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    try:
+        ses = _tel_load(data)
+    except Exception:
+        traceback.print_exc(); return fig_empty("No se pudo cargar la telemetría")
+    return tel_channel_fig(ses, drivers, color_map, 'Brake', 'Freno (%)',
+                           transform=lambda s: s.astype(float) * 100, step=True)
+
+@app.callback(Output('tel-gear', 'figure'), Input('store', 'data'),
+              Input('tel-drivers', 'value'), Input('tabs', 'value'), State('team-color-store', 'data'))
+def chart_tel_gear(data, drivers, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    try:
+        ses = _tel_load(data)
+    except Exception:
+        traceback.print_exc(); return fig_empty("No se pudo cargar la telemetría")
+    return tel_channel_fig(ses, drivers, color_map, 'nGear', 'Marcha', step=True)
+
+@app.callback(Output('tel-rpm', 'figure'), Input('store', 'data'),
+              Input('tel-drivers', 'value'), Input('tabs', 'value'), State('team-color-store', 'data'))
+def chart_tel_rpm(data, drivers, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    try:
+        ses = _tel_load(data)
+    except Exception:
+        traceback.print_exc(); return fig_empty("No se pudo cargar la telemetría")
+    return tel_channel_fig(ses, drivers, color_map, 'RPM', 'RPM')
+
+@app.callback(Output('tel-drs', 'figure'), Input('store', 'data'),
+              Input('tel-drivers', 'value'), Input('tabs', 'value'), State('team-color-store', 'data'))
+def chart_tel_drs(data, drivers, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    if not drivers:
+        return fig_empty("Elige pilotos arriba")
+    try:
+        ses = _tel_load(data)
+    except Exception:
+        traceback.print_exc(); return fig_empty("No se pudo cargar la telemetría")
+    return tel_channel_fig(ses, drivers, color_map, 'DRS', 'DRS (1 = abierto)',
+                           transform=lambda s: s.isin([10, 12, 14]).astype(int), step=True)
 
 # ---------- Results & championship standings ----------
 @app.callback(
