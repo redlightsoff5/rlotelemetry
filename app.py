@@ -568,6 +568,45 @@ def circuit_corners(ses):
     except Exception:
         return None
 
+def fastest_lap_full(ses, driver):
+    """(lap, telemetry) for a driver's fastest lap, or (None, None)."""
+    try:
+        lap = ses.laps.pick_drivers(driver).pick_fastest()
+        if lap is None:
+            return None, None
+        return lap, lap.get_telemetry().add_distance()
+    except Exception:
+        return None, None
+
+def lap_time_str(lap):
+    try:
+        return s_to_mssmmm(lap['LapTime'].total_seconds())
+    except Exception:
+        return ""
+
+def sector_distances(lap, tel):
+    """Distances where sector 1 and sector 2 end (for S1/S2 markers)."""
+    try:
+        rel = tel['Time'] - tel['Time'].iloc[0]
+        s1 = lap['Sector1Time']; s2 = lap['Sector2Time']
+        d1 = float(tel.loc[rel >= s1, 'Distance'].iloc[0])
+        d2 = float(tel.loc[rel >= (s1 + s2), 'Distance'].iloc[0])
+        return d1, d2
+    except Exception:
+        return None, None
+
+def add_sector_lines(f, d1, d2):
+    """Dashed S1/S2 vertical markers with boxed labels (f1insightshub style)."""
+    for d, lab in [(d1, "S1"), (d2, "S2")]:
+        if d is None:
+            continue
+        f.add_vline(x=d, line=dict(color="rgba(255,255,255,0.30)", width=1, dash="dash"))
+        f.add_annotation(x=d, yref="paper", y=1.0, text=lab, showarrow=False,
+                         font=dict(size=11, color=COL_MUTED),
+                         bgcolor="rgba(255,255,255,0.06)", bordercolor="rgba(255,255,255,0.22)",
+                         borderwidth=1, borderpad=2)
+    return f
+
 # ---------- Builders ----------
 def driver_team_color_map(ses):
     laps = ses.laps[['Driver','Team']].copy() if hasattr(ses, "laps") else pd.DataFrame()
@@ -1427,40 +1466,36 @@ def chart_tel_speed(data, selected, tab, color_map):
     if tab != 'tele' or not data:
         raise PreventUpdate
     if not selected:
-        return fig_empty("Elige 1–3 pilotos para comparar")
-    selected = selected[:3]
+        return fig_empty("Elige pilotos para comparar")
+    selected = selected[:4]
     try:
         ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
     except Exception:
         traceback.print_exc()
         return fig_empty("No se pudo cargar la telemetría")
+    color_map = color_map or {}
     f = go.Figure()
     drawn = False
+    d_s1 = d_s2 = None
     for drv in selected:
-        tel = fastest_lap_telemetry(ses, drv)
+        lap, tel = fastest_lap_full(ses, drv)
         if tel is None or 'Speed' not in tel.columns or 'Distance' not in tel.columns:
             continue
-        c = (color_map or {}).get(drv)
+        if d_s1 is None:
+            d_s1, d_s2 = sector_distances(lap, tel)
+        c = color_map.get(drv)
         f.add_trace(go.Scatter(
-            x=tel['Distance'], y=tel['Speed'], mode='lines', name=str(drv),
-            line=dict(color=c, width=2) if c else dict(width=2),
+            x=tel['Distance'], y=tel['Speed'], mode='lines',
+            name=f"{drv} — {lap_time_str(lap)}",
+            line=dict(color=c, width=1.8) if c else dict(width=1.8),
             hovertemplate=f"{drv} — %{{x:.0f}} m<br>%{{y:.0f}} km/h<extra></extra>"))
         drawn = True
     if not drawn:
         return fig_empty("Sin telemetría disponible para esos pilotos")
-    corners = circuit_corners(ses)
-    if corners is not None and 'Distance' in getattr(corners, 'columns', []):
-        for _, cc in corners.iterrows():
-            try:
-                xd = float(cc['Distance'])
-            except Exception:
-                continue
-            f.add_vline(x=xd, line=dict(color='rgba(255,255,255,0.10)', width=1),
-                        annotation_text=f"T{int(cc['Number'])}", annotation_position="top",
-                        annotation_font=dict(size=9, color=COL_MUTED))
-    f.update_layout(title="Velocidad vs distancia — vuelta rápida")
+    add_sector_lines(f, d_s1, d_s2)
     f.update_xaxes(title="Distancia (m)")
-    f.update_yaxes(title="km/h")
+    f.update_yaxes(title="Velocidad (km/h)")
+    f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
     return polish(f)
 
 @app.callback(
