@@ -165,7 +165,7 @@ COMMON_LAYOUT = dict(
     paper_bgcolor=COL_PANEL,
     plot_bgcolor=COL_PANEL,
     font=dict(color=COL_TEXT, family=FONT_FAMILY),
-    margin=dict(l=14, r=14, t=54, b=46)
+    margin=dict(l=58, r=20, t=54, b=46)
 )
 
 def brand(fig):
@@ -1056,11 +1056,10 @@ def tab_telemetry():
             "para el DELTA y el MAPA DE DOMINANCIA elige exactamente 2. La primera carga "
             "descarga datos (unos segundos).",
             className="rlo-note"),
-        graph_box('tel-speed', 'Velocidad vs distancia — vuelta rápida (con curvas)', 'tel_spd'),
-        dbc.Row([
-            dbc.Col(graph_box('tel-delta', 'Delta de tiempo (2 pilotos)', 'tel_delta'), md=6),
-            dbc.Col(graph_box('tel-map', 'Mapa de dominancia / velocidad', 'tel_map'), md=6),
-        ], className="g-2 mt-2"),
+        graph_box('tel-speed', 'Velocidad vs distancia', 'tel_spd'),
+        html.Div(graph_box('tel-delta', 'Delta de tiempo (elige 2 pilotos)', 'tel_delta'), className="mt-2"),
+        html.Div(graph_box('tel-accel', 'Aceleración longitudinal (g)', 'tel_accel'), className="mt-2"),
+        html.Div(graph_box('tel-map', 'Mapa de dominancia (elige 2 pilotos)', 'tel_map'), className="mt-2"),
     ])
 
 def tab_results():
@@ -1236,7 +1235,7 @@ def fill_dropdowns(drivers, _children, ids):
     for _id in ids:
         out_opts.append(opts)
         # Telemetry is heavy: start empty so nothing downloads until the user picks.
-        out_val.append([] if _id.get('chart') in ('tel_spd', 'tel_map', 'tel_delta') else drivers)
+        out_val.append([] if _id.get('chart') in ('tel_spd', 'tel_map', 'tel_delta', 'tel_accel') else drivers)
     return out_opts, out_val
 
 # ===== Year-driven GP list + guard against future-only seasons =====
@@ -1571,8 +1570,8 @@ def chart_tel_delta(data, selected, tab, color_map):
     try:
         from fastf1.utils import delta_time
         ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
-        lap_a = ses.laps.pick_drivers(a).pick_fastest()
-        lap_b = ses.laps.pick_drivers(b).pick_fastest()
+        lap_a, tel_a = fastest_lap_full(ses, a)
+        lap_b, _ = fastest_lap_full(ses, b)
         delta, ref_tel, _ = delta_time(lap_a, lap_b)
     except Exception:
         traceback.print_exc()
@@ -1581,15 +1580,71 @@ def chart_tel_delta(data, selected, tab, color_map):
         x = ref_tel['Distance']
     except Exception:
         x = list(range(len(delta)))
-    cb = (color_map or {}).get(b) or '#27F4D2'
-    f = go.Figure(go.Scatter(x=x, y=delta, mode='lines',
-                  line=dict(color=cb, width=2), fill='tozeroy',
-                  fillcolor='rgba(255,255,255,0.05)',
-                  hovertemplate="%{x:.0f} m<br>Δ %{y:+.3f}s<extra></extra>", name=f"{b} vs {a}"))
-    f.add_hline(y=0, line=dict(color='rgba(255,255,255,0.3)', width=1))
-    f.update_layout(title=f"Delta de tiempo — {b} respecto a {a}  (↑ {b} más lento)")
+    color_map = color_map or {}
+    ca = color_map.get(a) or '#27F4D2'
+    cb = color_map.get(b) or '#3671C6'
+    f = go.Figure()
+    f.add_trace(go.Scatter(x=x, y=[0] * len(x), mode='lines', line=dict(color=ca, width=1.5),
+                           name=f"{a} — {lap_time_str(lap_a)}", hoverinfo='skip'))
+    f.add_trace(go.Scatter(x=x, y=delta, mode='lines', line=dict(color=cb, width=2),
+                           name=f"{b} — {lap_time_str(lap_b)}",
+                           hovertemplate="%{x:.0f} m<br>Δ %{y:+.3f}s<extra></extra>"))
+    add_sector_lines(f, *sector_distances(lap_a, tel_a))
     f.update_xaxes(title="Distancia (m)")
-    f.update_yaxes(title="Δ s")
+    f.update_yaxes(title="Delta (s)  ·  + = más lento")
+    f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
+    return polish(f)
+
+@app.callback(
+    Output('tel-accel', 'figure'),
+    Input('store', 'data'),
+    Input({'role': 'drv', 'chart': 'tel_accel'}, 'value'),
+    Input('tabs', 'value'),
+    State('team-color-store', 'data'),
+)
+def chart_tel_accel(data, selected, tab, color_map):
+    if tab != 'tele' or not data:
+        raise PreventUpdate
+    sel = (selected or [])[:3]
+    if not sel:
+        return fig_empty("Elige pilotos para comparar")
+    try:
+        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+    except Exception:
+        traceback.print_exc()
+        return fig_empty("No se pudo cargar la telemetría")
+    color_map = color_map or {}
+    f = go.Figure()
+    drawn = False
+    d_s1 = d_s2 = None
+    for drv in sel:
+        lap, tel = fastest_lap_full(ses, drv)
+        if tel is None or not {'Speed', 'Time', 'Distance'}.issubset(tel.columns):
+            continue
+        if d_s1 is None:
+            d_s1, d_s2 = sector_distances(lap, tel)
+        try:
+            v = tel['Speed'].values / 3.6
+            t = (tel['Time'] - tel['Time'].iloc[0]).dt.total_seconds().values
+            with np.errstate(divide='ignore', invalid='ignore'):
+                acc = np.divide(np.diff(v), np.diff(t)) / 9.81
+            acc = np.clip(np.nan_to_num(acc), -7, 7)
+            acc = pd.Series(acc).rolling(5, min_periods=1, center=True).mean().values
+            xd = tel['Distance'].values[1:]
+        except Exception:
+            continue
+        c = color_map.get(drv)
+        f.add_trace(go.Scatter(x=xd, y=acc, mode='lines', name=f"{drv} — {lap_time_str(lap)}",
+                    line=dict(color=c, width=1.5) if c else dict(width=1.5),
+                    hovertemplate=f"{drv} — %{{x:.0f}} m<br>%{{y:+.1f}} g<extra></extra>"))
+        drawn = True
+    if not drawn:
+        return fig_empty("Sin datos de aceleración")
+    f.add_hline(y=0, line=dict(color='rgba(255,255,255,0.25)', width=1))
+    add_sector_lines(f, d_s1, d_s2)
+    f.update_xaxes(title="Distancia (m)")
+    f.update_yaxes(title="Aceleración long. (g)")
+    f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
     return polish(f)
 
 # ---------- Results & championship standings ----------
