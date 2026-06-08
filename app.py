@@ -607,9 +607,44 @@ def add_sector_lines(f, d1, d2):
                          borderwidth=1, borderpad=2)
     return f
 
-def tel_card(graph_id, title):
+
+def add_corner_labels(f, ses):
+    """Optional T1/T2/... markers like f1insightshub."""
+    corners = circuit_corners(ses)
+    if corners is None or 'Distance' not in getattr(corners, 'columns', []):
+        return f
+    for _, cc in corners.iterrows():
+        try:
+            d = float(cc['Distance'])
+            n = int(cc['Number'])
+        except Exception:
+            continue
+        f.add_vline(x=d, line=dict(color="rgba(255,255,255,0.10)", width=1, dash="dot"))
+        f.add_annotation(x=d, yref="paper", y=0.90, text=f"T{n}", showarrow=False,
+                         font=dict(size=9, color="#aeb4c2"),
+                         bgcolor="rgba(0,0,0,0.35)", bordercolor="rgba(255,255,255,0.12)",
+                         borderwidth=1, borderpad=1)
+    return f
+
+def add_tel_labels(f, d1, d2, ses, labels):
+    labels = set(labels or [])
+    if 'sectors' in labels:
+        add_sector_lines(f, d1, d2)
+    if 'corners' in labels:
+        add_corner_labels(f, ses)
+    return f
+
+def tel_card(graph_id, title, chart_key):
     return html.Div(className="box mt-2", children=[
-        html.H5(title, className="m-0"),
+        html.Div([
+            html.H5(title, className="m-0"),
+            dbc.Button("CSV", id={"role": "tel-csv", "chart": chart_key}, n_clicks=0,
+                       size="sm", outline=True, color="secondary", style={"padding":"2px 10px"}),
+            dbc.Button("PNG", id={"role": "png", "chart": chart_key, "graph": graph_id}, n_clicks=0,
+                       size="sm", outline=True, color="secondary", style={"padding":"2px 10px"}),
+            dcc.Download(id={"role":"tel-csv-dl", "chart": chart_key}),
+            html.Span(id={"role":"png-dummy", "chart": chart_key}, style={"display":"none"}),
+        ], style={"display":"flex", "alignItems":"center", "gap":"8px", "flexWrap":"wrap"}),
         dcc.Loading(dcc.Graph(id=graph_id, figure=fig_empty(title),
                               config={"displayModeBar": False, "scrollZoom": True},
                               style={"height": "330px"}), type="default"),
@@ -618,7 +653,7 @@ def tel_card(graph_id, title):
 def _tel_load(data):
     return load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
 
-def tel_channel_fig(ses, drivers, color_map, ycol, ytitle, transform=None, step=False):
+def tel_channel_fig(ses, drivers, color_map, ycol, ytitle, transform=None, step=False, labels=None):
     """Generic multi-driver telemetry channel vs distance (f1insightshub style)."""
     drivers = (drivers or [])[:4]
     if not drivers:
@@ -648,7 +683,7 @@ def tel_channel_fig(ses, drivers, color_map, ycol, ytitle, transform=None, step=
         drawn = True
     if not drawn:
         return fig_empty("Sin datos para esos pilotos")
-    add_sector_lines(f, d1, d2)
+    add_tel_labels(f, d1, d2, ses, labels)
     f.update_xaxes(title="Distancia (m)")
     f.update_yaxes(title=ytitle)
     f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
@@ -876,8 +911,9 @@ def header_controls():
             dcc.Dropdown(
                 id='year-dd',
                 options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
-                value=y0,
-                clearable=False
+                value=None,
+                placeholder="Selecciona año...",
+                clearable=True
             ),
             html.Div(id='year-warning', className="mt-1", style={'fontSize':'0.85rem','opacity':0.85})
         ], md=3),
@@ -886,9 +922,9 @@ def header_controls():
             dbc.Label("Gran Premio"),
             dcc.Dropdown(
                 id='event-dd',
-                options=build_gp_options(y0),
-                value=default_event_value(y0),
-                clearable=False,
+                options=[],
+                value=None,
+                clearable=True,
                 placeholder="Selecciona evento..."
             )
         ], md=6),
@@ -898,8 +934,9 @@ def header_controls():
             dcc.Dropdown(
                 id='session-dd',
                 options=SESSION_OPTIONS,
-                value='R',
-                clearable=False
+                value=None,
+                placeholder="Selecciona sesión...",
+                clearable=True
             )
         ], md=3),
     ], className="g-2 align-items-end"))
@@ -919,7 +956,17 @@ def graph_box(graph_id: str, title: str, chart_key: str):
                         color="secondary",
                         style={"padding":"2px 10px"}
                     ),
+                    dbc.Button(
+                        "PNG",
+                        id={"role": "png", "chart": chart_key, "graph": graph_id},
+                        n_clicks=0,
+                        size="sm",
+                        outline=True,
+                        color="secondary",
+                        style={"padding":"2px 10px"}
+                    ),
                     dcc.Download(id={"role":"csv-dl", "chart": chart_key}),
+                    html.Span(id={"role":"png-dummy", "chart": chart_key}, style={"display":"none"}),
                 ], style={"display":"flex", "alignItems":"center", "gap":"8px"}),
                 md=6
             ),
@@ -1103,19 +1150,35 @@ def tab_telemetry():
             "Si el selector está en Carrera, usamos Clasificación para comparar vueltas rápidas y evitar cargas enormes.",
             className="rlo-note"),
         html.Div(className="box", children=[
-            dbc.Label("Pilotos"),
-            dcc.Dropdown(id='tel-drivers', multi=True, options=[], value=[],
-                         placeholder="Elige pilotos..."),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Pilotos"),
+                    dcc.Dropdown(id='tel-drivers', multi=True, options=[], value=[],
+                                 placeholder="Elige pilotos..."),
+                ], md=7),
+                dbc.Col([
+                    dbc.Label("Etiquetas"),
+                    dcc.Checklist(
+                        id='tel-labels',
+                        options=[
+                            {'label': 'Sectores S1/S2', 'value': 'sectors'},
+                            {'label': 'Curvas T1, T2...', 'value': 'corners'},
+                        ],
+                        value=['sectors'],
+                        inline=True,
+                        className='rlo-checks'
+                    ),
+                ], md=5),
+            ], className="g-2"),
         ]),
-        tel_card('tel-speed', 'Velocidad (km/h)'),
-        tel_card('tel-delta', 'Delta de tiempo (elige 2)'),
-        tel_card('tel-throttle', 'Acelerador (%)'),
-        tel_card('tel-brake', 'Freno (%)'),
-        tel_card('tel-accel', 'Aceleración longitudinal (g)'),
-        tel_card('tel-gear', 'Marcha'),
-        tel_card('tel-rpm', 'RPM'),
-        tel_card('tel-drs', 'DRS (1 = abierto)'),
-        tel_card('tel-map', 'Mapa de dominancia (elige 2)'),
+        tel_card('tel-speed', 'Velocidad (km/h)', 'tel_spd'),
+        tel_card('tel-delta', 'Delta de tiempo (elige 2)', 'tel_delta'),
+        tel_card('tel-throttle', 'Acelerador (%)', 'tel_throttle'),
+        tel_card('tel-brake', 'Freno (%)', 'tel_brake'),
+        tel_card('tel-accel', 'Aceleración longitudinal (m/s²)', 'tel_accel'),
+        tel_card('tel-gear', 'Marcha', 'tel_gear'),
+        tel_card('tel-rpm', 'RPM', 'tel_rpm'),
+        tel_card('tel-map', 'Mapa de dominancia (elige 2)', 'tel_map'),
     ])
 
 def tab_results():
@@ -1227,6 +1290,30 @@ app.layout = dbc.Container([
     dcc.Store(id='team-color-store')
 ], fluid=True, className='rlo-page')
 
+
+app.clientside_callback(
+    """
+    function(n_clicks, btn_id) {
+        if (!n_clicks || !btn_id || !btn_id.graph) { return ''; }
+        var gd = document.getElementById(btn_id.graph);
+        if (!gd || !window.Plotly) { return ''; }
+        var filename = 'rlo_' + (btn_id.chart || 'grafico');
+        Plotly.downloadImage(gd, {
+            format: 'png',
+            filename: filename,
+            height: Math.max(720, gd.clientHeight || 720),
+            width: Math.max(1280, gd.clientWidth || 1280),
+            scale: 2
+        });
+        return String(Date.now());
+    }
+    """,
+    Output({'role': 'png-dummy', 'chart': MATCH}, 'children'),
+    Input({'role': 'png', 'chart': MATCH}, 'n_clicks'),
+    State({'role': 'png', 'chart': MATCH}, 'id'),
+    prevent_initial_call=True,
+)
+
 @app.callback(Output("tab-body","children"), Input("tabs","value"))
 def _render_tabs(val):
     return {"inicio":tab_home, "live":tab_live, "evo":tab_evolution, "pace":tab_pace,
@@ -1242,7 +1329,7 @@ def _render_tabs(val):
 )
 def _event_changed_set_sessions(event_val, current):
     if not event_val:
-        return SESSION_OPTIONS, 'R'
+        return SESSION_OPTIONS, None
 
     kind = str(event_val).split("|", 1)[0]
     if kind == "TEST":
@@ -1265,7 +1352,7 @@ def _event_changed_set_sessions(event_val, current):
 )
 def load_session_meta(year, event_value, sess_code):
     if not year or not event_value or not sess_code:
-        return no_update, [], {}
+        return None, [], {}
     try:
         ses = load_session_laps(int(year), str(event_value), str(sess_code))
         laps = ses.laps.dropna(subset=['LapTime'])
@@ -1518,11 +1605,11 @@ def chart_speeds(data, selected):
     return polish(f)
 
 # ---------- Telemetry ----------
-def _telemetry_figures(data, selected, color_map):
+def _telemetry_figures(data, selected, color_map, labels):
     empty = fig_empty("Elige pilotos arriba")
     selected = (selected or [])[:4]
     if not selected:
-        return [empty] * 9
+        return [empty] * 8
     year = int(data.get('year', 2025))
     event = data['event']
     sess = str(data.get('sess', 'Q')).upper()
@@ -1538,27 +1625,25 @@ def _telemetry_figures(data, selected, color_map):
             except Exception:
                 traceback.print_exc()
                 err = fig_empty("No se pudo cargar la telemetria")
-                return [err] * 9
+                return [err] * 8
         else:
             traceback.print_exc()
             err = fig_empty("No se pudo cargar la telemetria")
-            return [err] * 9
+            return [err] * 8
     color_map = color_map or {}
     return [
-        _fig_tel_speed(ses, selected, color_map),
-        _fig_tel_delta(ses, selected, color_map),
-        tel_channel_fig(ses, selected, color_map, 'Throttle', 'Acelerador (%)'),
+        _fig_tel_speed(ses, selected, color_map, labels),
+        _fig_tel_delta(ses, selected, color_map, labels),
+        tel_channel_fig(ses, selected, color_map, 'Throttle', 'Acelerador (%)', labels=labels),
         tel_channel_fig(ses, selected, color_map, 'Brake', 'Freno (%)',
-                        transform=lambda s: s.astype(bool).astype(int) * 100, step=True),
-        _fig_tel_accel(ses, selected, color_map),
-        tel_channel_fig(ses, selected, color_map, 'nGear', 'Marcha', step=True),
-        tel_channel_fig(ses, selected, color_map, 'RPM', 'RPM'),
-        tel_channel_fig(ses, selected, color_map, 'DRS', 'DRS (1 = abierto)',
-                        transform=lambda s: s.isin([10, 12, 14]).astype(int), step=True),
+                        transform=lambda s: s.astype(bool).astype(int) * 100, step=True, labels=labels),
+        _fig_tel_accel(ses, selected, color_map, labels),
+        tel_channel_fig(ses, selected, color_map, 'nGear', 'Marcha', step=True, labels=labels),
+        tel_channel_fig(ses, selected, color_map, 'RPM', 'RPM', labels=labels),
         _fig_tel_map(ses, selected, color_map),
     ]
 
-def _fig_tel_speed(ses, selected, color_map):
+def _fig_tel_speed(ses, selected, color_map, labels):
     f = go.Figure()
     drawn = False
     d_s1 = d_s2 = None
@@ -1577,7 +1662,7 @@ def _fig_tel_speed(ses, selected, color_map):
         drawn = True
     if not drawn:
         return fig_empty("Sin telemetria disponible para esos pilotos")
-    add_sector_lines(f, d_s1, d_s2)
+    add_tel_labels(f, d_s1, d_s2, ses, labels)
     f.update_xaxes(title="Distancia (m)")
     f.update_yaxes(title="Velocidad (km/h)")
     f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
@@ -1595,17 +1680,30 @@ def _fig_tel_map(ses, selected, color_map):
             if ta is None or tb is None or not {'X', 'Y', 'Speed', 'Distance'}.issubset(ta.columns):
                 return fig_empty("Sin datos de posicion")
             sb = np.interp(ta['Distance'].values, tb['Distance'].values, tb['Speed'].values)
-            a_faster = ta['Speed'].values >= sb
+            a_faster = (ta['Speed'].values >= sb).astype(int)
             ca = color_map.get(a) or '#e10600'
             cb = color_map.get(b) or '#27F4D2'
-            cols = np.where(a_faster, ca, cb)
-            f = go.Figure(go.Scatter(x=ta['X'], y=ta['Y'], mode='markers',
-                          marker=dict(size=5, color=cols), showlegend=False, hoverinfo='skip'))
-            f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                                   marker=dict(color=ca, size=9), name=f"{a} +rapido"))
-            f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                                   marker=dict(color=cb, size=9), name=f"{b} +rapido"))
-            f.update_layout(title=f"Dominancia - {a} vs {b}")
+            f = go.Figure()
+            # Track shadow underneath: makes the dominance colours readable on dark backgrounds.
+            f.add_trace(go.Scatter(x=ta['X'], y=ta['Y'], mode='lines',
+                                   line=dict(color='rgba(255,255,255,0.16)', width=12),
+                                   showlegend=False, hoverinfo='skip'))
+            start = 0
+            for i in range(1, len(a_faster)):
+                if a_faster[i] != a_faster[start]:
+                    col = ca if a_faster[start] else cb
+                    f.add_trace(go.Scatter(x=ta['X'].iloc[start:i+1], y=ta['Y'].iloc[start:i+1], mode='lines',
+                                           line=dict(color=col, width=7), showlegend=False, hoverinfo='skip'))
+                    start = i
+            col = ca if a_faster[start] else cb
+            f.add_trace(go.Scatter(x=ta['X'].iloc[start:], y=ta['Y'].iloc[start:], mode='lines',
+                                   line=dict(color=col, width=7), showlegend=False, hoverinfo='skip'))
+            f.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
+                                   line=dict(color=ca, width=7), name=f"{a} más rápido"))
+            f.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
+                                   line=dict(color=cb, width=7), name=f"{b} más rápido"))
+            f.update_layout(title=f"Dominancia - {a} vs {b}",
+                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5))
         else:
             drv = sel[0]
             tel = fastest_lap_telemetry(ses, drv)
@@ -1624,7 +1722,7 @@ def _fig_tel_map(ses, selected, color_map):
     f.update_yaxes(visible=False, scaleanchor="x", scaleratio=1)
     return polish(f)
 
-def _fig_tel_delta(ses, selected, color_map):
+def _fig_tel_delta(ses, selected, color_map, labels):
     sel = (selected or [])[:2]
     if len(sel) < 2:
         return fig_empty("Elige 2 pilotos para el delta")
@@ -1655,13 +1753,13 @@ def _fig_tel_delta(ses, selected, color_map):
         d_s1, d_s2 = sector_distances(lap_a, ref_tel)
     except Exception:
         pass
-    add_sector_lines(f, d_s1, d_s2)
+    add_tel_labels(f, d_s1, d_s2, ses, labels)
     f.update_xaxes(title="Distancia (m)")
     f.update_yaxes(title="Delta (s)")
     f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
     return polish(f)
 
-def _fig_tel_accel(ses, selected, color_map):
+def _fig_tel_accel(ses, selected, color_map, labels):
     f = go.Figure()
     drawn = False
     d_s1 = d_s2 = None
@@ -1685,7 +1783,7 @@ def _fig_tel_accel(ses, selected, color_map):
         drawn = True
     if not drawn:
         return fig_empty("Sin datos de aceleracion")
-    add_sector_lines(f, d_s1, d_s2)
+    add_tel_labels(f, d_s1, d_s2, ses, labels)
     f.update_xaxes(title="Distancia (m)")
     f.update_yaxes(title="Aceleracion longitudinal (m/s^2)")
     f.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5))
@@ -1699,17 +1797,17 @@ def _fig_tel_accel(ses, selected, color_map):
     Output('tel-accel', 'figure'),
     Output('tel-gear', 'figure'),
     Output('tel-rpm', 'figure'),
-    Output('tel-drs', 'figure'),
     Output('tel-map', 'figure'),
     Input('store', 'data'),
     Input('tel-drivers', 'value'),
+    Input('tel-labels', 'value'),
     Input('tabs', 'value'),
     State('team-color-store', 'data'),
 )
-def render_telemetry_charts(data, selected, tab, color_map):
+def render_telemetry_charts(data, selected, labels, tab, color_map):
     if tab != 'tele' or not data:
         raise PreventUpdate
-    return _telemetry_figures(data, selected, color_map)
+    return _telemetry_figures(data, selected, color_map, labels)
 
 # ---------- Results & championship standings ----------
 @app.callback(
