@@ -127,7 +127,7 @@ TEAM_ALIASES = {
     'williams': 'Williams',
     'williams racing': 'Williams',
 
-    # Sauber / Kick / Stake / Audi (bucketed for 2025â€“2026)
+    # Sauber / Kick / Stake / Audi (bucketed for 2025–2026)
     'sauber': 'Sauber',
     'kick sauber': 'Sauber',
     'stake': 'Sauber',
@@ -142,7 +142,7 @@ TEAM_ALIASES = {
     'gm cadillac': 'Cadillac',
     'cadillac f1': 'Cadillac',
     'cadillac f1 team': 'Cadillac',
-    'andretti': 'Cadillac',          # por si FastF1 lo etiqueta asÃ­ en algÃºn punto
+    'andretti': 'Cadillac',          # por si FastF1 lo etiqueta así en algún punto
 
 }
 
@@ -236,7 +236,7 @@ def build_gp_options(year:int):
             })
         else:
             opts.append({
-                "label": f"R{int(r.RoundNumber)} â€” {name} ({date})",
+                "label": f"R{int(r.RoundNumber)} — {name} ({date})",
                 "value": f"GP|{name}"
             })
     return opts
@@ -248,7 +248,7 @@ def default_event_value(year:int):
     if past.empty:
         return None
 
-    # Prefer the most recent event we have pre-computed â†’ instant first paint.
+    # Prefer the most recent event we have pre-computed -> instant first paint.
     gp_past = past[past['EventFormat'].astype(str).str.lower() != 'testing']
     for _, ev in gp_past[::-1].iterrows():
         if read_cached_session(int(year), f"GP|{ev['EventName']}", 'R') is not None:
@@ -267,16 +267,16 @@ SESSION_OPTIONS = [
     {"label": "Libres 1 (FP1)",       "value": "FP1"},
     {"label": "Libres 2 (FP2)",       "value": "FP2"},
     {"label": "Libres 3 (FP3)",       "value": "FP3"},
-    {"label": "ClasificaciÃ³n Sprint", "value": "SQ"},
-    {"label": "ClasificaciÃ³n",        "value": "Q"},
+    {"label": "Clasificación Sprint", "value": "SQ"},
+    {"label": "Clasificación",        "value": "Q"},
     {"label": "Sprint",               "value": "SR"},
     {"label": "Carrera",              "value": "R"},
 ]
 
 TEST_SESSION_OPTIONS = [
-    {"label": "DÃ­a 1", "value": "T1"},
-    {"label": "DÃ­a 2", "value": "T2"},
-    {"label": "DÃ­a 3", "value": "T3"},
+    {"label": "Día 1", "value": "T1"},
+    {"label": "Día 2", "value": "T2"},
+    {"label": "Día 3", "value": "T3"},
 ]
 
 # ---------- Pre-computed data (served instantly; falls back to live FastF1) ----------
@@ -378,7 +378,7 @@ def load_session_results_only(year:int, event_value:str, sess_code:str):
 
 @lru_cache(maxsize=8)
 def season_standings(year:int, date_token:str):
-    """Official driver & constructor standings from Ergast/jolpica â€” ONE fast,
+    """Official driver & constructor standings from Ergast/jolpica — ONE fast,
     authoritative call (correct points, no per-race loading). Falls back to
     summing cached results only if the API is unavailable."""
     try:
@@ -446,8 +446,8 @@ def _season_standings_sum(year:int, date_token:str):
 # ---------- Schedule helpers (Home & Live tabs) ----------
 SESSION_ES = {
     "Practice 1": "Libres 1", "Practice 2": "Libres 2", "Practice 3": "Libres 3",
-    "Qualifying": "ClasificaciÃ³n", "Sprint": "Sprint", "Sprint Race": "Sprint",
-    "Sprint Qualifying": "ClasificaciÃ³n Sprint", "Sprint Shootout": "ClasificaciÃ³n Sprint",
+    "Qualifying": "Clasificación", "Sprint": "Sprint", "Sprint Race": "Sprint",
+    "Sprint Qualifying": "Clasificación Sprint", "Sprint Shootout": "Clasificación Sprint",
     "Race": "Carrera",
 }
 
@@ -642,9 +642,9 @@ def tel_channel_fig(ses, drivers, color_map, ycol, ytitle, transform=None, step=
                 pass
         c = color_map.get(drv)
         f.add_trace(go.Scatter(x=tel['Distance'], y=y, mode='lines',
-                    name=f"{drv} â€” {lap_time_str(lap)}",
+                    name=f"{drv} — {lap_time_str(lap)}",
                     line=dict(color=c, width=1.6, shape=shape) if c else dict(width=1.6, shape=shape),
-                    hovertemplate=f"{drv} â€” %{{x:.0f}} m<br>%{{y}}<extra></extra>"))
+                    hovertemplate=f"{drv} — %{{x:.0f}} m<br>%{{y}}<extra></extra>"))
         drawn = True
     if not drawn:
         return fig_empty("Sin datos para esos pilotos")
@@ -834,7 +834,7 @@ app.index_string = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
   {{%metas%}}
-  <meta name="description" content="RLO Telemetry â€” anÃ¡lisis y telemetrÃ­a de FÃ³rmula 1 por @redlightsoff5: ritmo, neumÃ¡ticos, telemetrÃ­a, clasificaciÃ³n y resultados.">
+  <meta name="description" content="RLO Telemetry — análisis y telemetría de Fórmula 1 por @redlightsoff5: ritmo, neumáticos, telemetría, clasificación y resultados.">
   <title>{SITE_TITLE}</title>
   {{%favicon%}}
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -872,7 +872,7 @@ def header_controls():
     y0 = default_year_value()
     return html.Div(className="rlo-filter", children=dbc.Row([
         dbc.Col([
-            dbc.Label("AÃ±o"),
+            dbc.Label("Año"),
             dcc.Dropdown(
                 id='year-dd',
                 options=[{'label': str(y), 'value': y} for y in YEARS_ALLOWED],
@@ -894,7 +894,7 @@ def header_controls():
         ], md=6),
 
         dbc.Col([
-            dbc.Label("SesiÃ³n"),
+            dbc.Label("Sesión"),
             dcc.Dropdown(
                 id='session-dd',
                 options=SESSION_OPTIONS,
@@ -949,16 +949,16 @@ def tab_evolution():
     return html.Div([
         dbc.Row([
             dbc.Col(graph_box('gap','Diferencia (Gap)','gap'), md=6),
-            dbc.Col(graph_box('lapchart','PosiciÃ³n por vuelta','lc'), md=6),
+            dbc.Col(graph_box('lapchart','Posición por vuelta','lc'), md=6),
         ], className="g-2"),
         dbc.Row([
-            dbc.Col(graph_box('evo-pace','EvoluciÃ³n del ritmo','ep'), md=6),
+            dbc.Col(graph_box('evo-pace','Evolución del ritmo','ep'), md=6),
             dbc.Col(graph_box('pos','Posiciones ganadas','pos'), md=6),
         ], className="g-2 mt-1"),
     ])
 
 def tab_tyres():
-    return html.Div([ graph_box('tyre-strategy','Estrategia de neumÃ¡ticos','ty') ])
+    return html.Div([ graph_box('tyre-strategy','Estrategia de neumáticos','ty') ])
 
 def tab_pace():
     return html.Div([ graph_box('pace','Ritmo de carrera','pace') ])
@@ -967,7 +967,7 @@ def tab_records():
     return html.Div([
         dbc.Row([
             dbc.Col(graph_box('best-laps','Mejores vueltas','best'), md=6),
-            dbc.Col(graph_box('sectors','RÃ©cords por sector','sec'), md=6),
+            dbc.Col(graph_box('sectors','Récords por sector','sec'), md=6),
         ], className="g-2")
     ])
 
@@ -1002,7 +1002,7 @@ def _driver_cell(full, abbr, team):
             kids.append(html.Span(abbr, className="rlo-mono",
                                   style={"color": "var(--muted)", "marginLeft": "8px", "fontSize": "12px"}))
     else:
-        kids.append(html.Span(abbr or "â€”", style={"fontWeight": 600}))
+        kids.append(html.Span(abbr or "—", style={"fontWeight": 600}))
     return html.Span(kids, style={"display": "flex", "alignItems": "center"})
 
 def _table(header, rows):
@@ -1053,7 +1053,7 @@ def build_results_table(ses, sess_code):
 def _fastest_lap_table(ses):
     laps = ses.laps.dropna(subset=['LapTime']) if hasattr(ses, 'laps') else pd.DataFrame()
     if laps.empty:
-        return html.Div("Sin datos de esta sesiÃ³n todavÃ­a.", className="rlo-note")
+        return html.Div("Sin datos de esta sesión todavía.", className="rlo-note")
     best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
     best['s'] = best['LapTime'].dt.total_seconds()
     best = best.sort_values('s')
@@ -1072,7 +1072,7 @@ def _fastest_lap_table(ses):
 
 def build_standings_drivers(drv_rows):
     if not drv_rows:
-        return html.Div("AÃºn no hay puntos esta temporada.", className="rlo-note")
+        return html.Div("Aún no hay puntos esta temporada.", className="rlo-note")
     rows = [[
         html.Span(str(i), className="rlo-pos"),
         _driver_cell(name, ab, team),
@@ -1083,7 +1083,7 @@ def build_standings_drivers(drv_rows):
 
 def build_standings_teams(team_rows):
     if not team_rows:
-        return html.Div("AÃºn no hay puntos esta temporada.", className="rlo-note")
+        return html.Div("Aún no hay puntos esta temporada.", className="rlo-note")
     rows = []
     for i, (tm, pts) in enumerate(team_rows, start=1):
         rows.append([
@@ -1099,19 +1099,19 @@ def build_standings_teams(team_rows):
 def tab_telemetry():
     return html.Div([
         html.Div(
-            "ðŸ“¡ TelemetrÃ­a de la vuelta rÃ¡pida. Elige 1â€“4 pilotos (para Delta y Dominancia, 2). "
-            "La primera carga descarga datos (unos segundos).",
+            "Telemetría de la vuelta rápida. Elige 1-4 pilotos. "
+            "Si el selector está en Carrera, usamos Clasificación para comparar vueltas rápidas y evitar cargas enormes.",
             className="rlo-note"),
         html.Div(className="box", children=[
             dbc.Label("Pilotos"),
             dcc.Dropdown(id='tel-drivers', multi=True, options=[], value=[],
-                         placeholder="Elige pilotosâ€¦"),
+                         placeholder="Elige pilotos..."),
         ]),
         tel_card('tel-speed', 'Velocidad (km/h)'),
         tel_card('tel-delta', 'Delta de tiempo (elige 2)'),
         tel_card('tel-throttle', 'Acelerador (%)'),
         tel_card('tel-brake', 'Freno (%)'),
-        tel_card('tel-accel', 'AceleraciÃ³n longitudinal (g)'),
+        tel_card('tel-accel', 'Aceleración longitudinal (g)'),
         tel_card('tel-gear', 'Marcha'),
         tel_card('tel-rpm', 'RPM'),
         tel_card('tel-drs', 'DRS (1 = abierto)'),
@@ -1121,10 +1121,10 @@ def tab_telemetry():
 def tab_results():
     return html.Div([
         html.Div(className="box", children=[
-            html.H5("Resultado de la sesiÃ³n", className="m-0"),
+            html.H5("Resultado de la sesión", className="m-0"),
             dcc.Loading(html.Div(id="results-table", className="mt-2"), type="default"),
         ]),
-        html.Div("ClasificaciÃ³n del campeonato", className="rlo-section-title mt-3"),
+        html.Div("Clasificación del campeonato", className="rlo-section-title mt-3"),
         dbc.Row([
             dbc.Col(html.Div(className="box", children=[
                 html.H5("Pilotos", className="m-0"),
@@ -1151,26 +1151,26 @@ def tab_home():
     return html.Div([
         html.Div(className="rlo-hero", children=[
             html.Div("RLO TELEMETRY", className="rlo-hero-title"),
-            html.Div("AnÃ¡lisis y telemetrÃ­a de FÃ³rmula 1 â€” datos al instante, en espaÃ±ol.",
+            html.Div("Análisis y telemetría de Fórmula 1 — datos al instante, en español.",
                      className="rlo-hero-sub"),
         ]),
         dbc.Row([
             dbc.Col(html.Div(className="box rlo-next", children=[
-                html.Div("PRÃ“XIMA SESIÃ“N", className="rlo-kicker"),
+                html.Div("PRÓXIMA SESIÓN", className="rlo-kicker"),
                 dcc.Loading(html.Div(id="home-next"), type="default"),
             ]), md=5),
             dbc.Col(html.Div(className="box", children=[
-                html.Div("ÃšLTIMO PODIO", className="rlo-kicker"),
+                html.Div("ÚLTIMO PODIO", className="rlo-kicker"),
                 dcc.Loading(html.Div(id="home-podium"), type="default"),
             ]), md=7),
         ], className="g-2"),
         dbc.Row([
             dbc.Col(html.Div(className="box", children=[
-                html.Div("LÃDERES â€” PILOTOS", className="rlo-kicker"),
+                html.Div("LÍDERES — PILOTOS", className="rlo-kicker"),
                 dcc.Loading(html.Div(id="home-drv"), type="default"),
             ]), md=6),
             dbc.Col(html.Div(className="box", children=[
-                html.Div("LÃDERES â€” CONSTRUCTORES", className="rlo-kicker"),
+                html.Div("LÍDERES — CONSTRUCTORES", className="rlo-kicker"),
                 dcc.Loading(html.Div(id="home-team"), type="default"),
             ]), md=6),
         ], className="g-2 mt-1"),
@@ -1185,19 +1185,19 @@ def tab_live():
             html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px",
                             "flexWrap": "wrap", "marginBottom": "10px"}, children=[
                 html.H5("Timing en vivo", className="m-0"),
-                html.A("Abrir F1-Dash â†—", href="https://f1-dash.com", target="_blank",
+                html.A("Abrir F1-Dash ↗", href="https://f1-dash.com", target="_blank",
                        rel="noopener noreferrer", className="rlo-action rlo-bmc"),
-                html.A("Race Telemetry â†—", href="https://www.racetelemetry.com", target="_blank",
+                html.A("Race Telemetry ↗", href="https://www.racetelemetry.com", target="_blank",
                        rel="noopener noreferrer", className="rlo-action"),
-                html.A("F1 oficial â†—", href="https://www.formula1.com/en/timing/f1-live",
+                html.A("F1 oficial ↗", href="https://www.formula1.com/en/timing/f1-live",
                        target="_blank", rel="noopener noreferrer", className="rlo-action"),
             ]),
             html.Iframe(src="https://www.f1telemetry.xyz/",
                         style={"width": "100%", "height": "70vh", "border": "0",
                                "borderRadius": "12px", "background": "#0c0c12"}),
             html.Div("El timing en vivo se sirve desde proveedores externos gratuitos. "
-                     "Si no se ve aquÃ­ (algunos bloquean la incrustaciÃ³n), usa los botones de "
-                     "arriba â€” F1-Dash es el mÃ¡s completo.",
+                     "Si no se ve aquí (algunos bloquean la incrustación), usa los botones de "
+                     "arriba — F1-Dash es el más completo.",
                      className="rlo-note", style={"marginTop": "10px"}),
         ]),
     ])
@@ -1212,11 +1212,11 @@ app.layout = dbc.Container([
         children=[
             dcc.Tab(label="Inicio", value="inicio", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="En vivo", value="live", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="EvoluciÃ³n", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Evolución", value="evo", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Ritmo", value="pace", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="NeumÃ¡ticos", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="TelemetrÃ­a", value="tele", className="rlo-tab", selected_className="rlo-tab--selected"),
-            dcc.Tab(label="RÃ©cords", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Neumáticos", value="tyres", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Telemetría", value="tele", className="rlo-tab", selected_className="rlo-tab--selected"),
+            dcc.Tab(label="Récords", value="records", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Velocidades", value="speeds", className="rlo-tab", selected_className="rlo-tab--selected"),
             dcc.Tab(label="Resultados", value="results", className="rlo-tab", selected_className="rlo-tab--selected"),
         ],
@@ -1321,7 +1321,7 @@ def _year_changed(year, current_event):
         value = current_event if current_event in valid else default_ev
         warn = ""
         if default_ev is None:
-            warn = f"AÃºn no hay eventos disputados en {year}. Selecciona 2025 para ver datos."
+            warn = f"Aún no hay eventos disputados en {year}. Selecciona 2025 para ver datos."
             value = None
         return opts, value, warn
     except Exception:
@@ -1346,10 +1346,10 @@ def chart_gap(data, selected, color_map):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = gap_to_leader_df(ses)
     if selected: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("Diferencia â€” sin datos")
+    if df.empty: return fig_empty("Diferencia — sin datos")
     if is_race(ses):
-        f = px.line(df, x='LapNumber', y='Gap_s', color='Driver', line_shape='spline', custom_data=['GapStr'], title='Diferencia con el lÃ­der (MM:SS.mmm)')
-        f.update_traces(hovertemplate="%{fullData.name} â€” Vuelta %{x}<br>%{y:.3f}s (%{customdata[0]})<extra></extra>")
+        f = px.line(df, x='LapNumber', y='Gap_s', color='Driver', line_shape='spline', custom_data=['GapStr'], title='Diferencia con el líder (MM:SS.mmm)')
+        f.update_traces(hovertemplate="%{fullData.name} — Vuelta %{x}<br>%{y:.3f}s (%{customdata[0]})<extra></extra>")
         f.update_yaxes(title="s", tickformat=".3f")
     else:
         gg = df.sort_values('Gap_s')
@@ -1368,8 +1368,8 @@ def chart_lapchart(data, selected, color_map):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     laps = ses.laps[['Driver','LapNumber','Position']].dropna()
     if selected: laps = laps[laps['Driver'].isin(selected)]
-    if laps.empty: return fig_empty("PosiciÃ³n por vuelta â€” sin datos")
-    f = px.line(laps, x='LapNumber', y='Position', color='Driver', title="PosiciÃ³n por vuelta (menor = mejor)")
+    if laps.empty: return fig_empty("Posición por vuelta — sin datos")
+    f = px.line(laps, x='LapNumber', y='Position', color='Driver', title="Posición por vuelta (menor = mejor)")
     f.update_yaxes(autorange="reversed", dtick=1)
     return set_trace_color(polish(f), color_map)
 
@@ -1383,15 +1383,15 @@ def chart_evo(data, selected, color_map):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
-    if pdf.empty: return fig_empty("EvoluciÃ³n â€” sin datos de vueltas")
+    if pdf.empty: return fig_empty("Evolución — sin datos de vueltas")
     pdf = pdf.sort_values(['Driver','LapNumber'])
     pdf['MA3'] = pdf.groupby('Driver', dropna=False)['LapSeconds'].transform(lambda s: s.rolling(3, min_periods=1).mean())
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
         f.add_trace(go.Scatter(x=d['LapNumber'], y=d['MA3'], mode='lines', name=str(drv), line=dict(shape='spline', width=2.2),
-                               hovertemplate=f"{drv} â€” Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
+                               hovertemplate=f"{drv} — Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
     f.update_yaxes(title="s (media 3 vueltas)", tickformat=".3f")
-    f.update_layout(title="EvoluciÃ³n del ritmo (media 3 vueltas)")
+    f.update_layout(title="Evolución del ritmo (media 3 vueltas)")
     return set_trace_color(polish(f), color_map)
 
 @app.callback(
@@ -1403,7 +1403,7 @@ def chart_pos(data, selected):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = positions_gained_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("Posiciones ganadas â€” (solo carrera / sin datos)")
+    if df.empty: return fig_empty("Posiciones ganadas — (solo carrera / sin datos)")
     f = px.bar(df, x='Abbreviation', y='PositionsGained', title='Posiciones ganadas', text='PositionsGained')
     f.update_traces(marker_line_width=0)
     return polish(f)
@@ -1418,7 +1418,7 @@ def chart_tyres(data, selected):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     st = tyre_stints_df(ses)
     if selected: st = st[st['Driver'].isin(selected)]
-    if st.empty: return fig_empty("Estrategia de neumÃ¡ticos â€” sin datos")
+    if st.empty: return fig_empty("Estrategia de neumáticos — sin datos")
     f = go.Figure()
     order = st['Driver'].unique().tolist()[::-1]
     cmap = {'SOFT':'#DA291C','MEDIUM':'#FFD12E','HARD':'#F0F0F0','INTERMEDIATE':'#43B02A','WET':'#00A3E0'}
@@ -1426,10 +1426,10 @@ def chart_tyres(data, selected):
         f.add_trace(go.Bar(x=[int(r['Laps'])], y=[r['Driver']], base=[int(r['LapStart'])-1],
                            orientation='h', marker_color=cmap.get(str(r['Compound']).upper(), '#888'),
                            showlegend=False,
-                           hovertemplate=f"{r['Driver']} â€” {r['Compound']}<br>Lap {int(r['LapStart'])}â€“{int(r['LapEnd'])}<extra></extra>"))
+                           hovertemplate=f"{r['Driver']} — {r['Compound']}<br>Lap {int(r['LapStart'])}–{int(r['LapEnd'])}<extra></extra>"))
     for n,c in cmap.items():
         f.add_trace(go.Bar(x=[None], y=[None], marker_color=c, name=n, showlegend=True))
-    f.update_layout(title='Estrategia de neumÃ¡ticos', barmode='stack',
+    f.update_layout(title='Estrategia de neumáticos', barmode='stack',
                     yaxis=dict(categoryorder='array', categoryarray=order, title='Piloto'),
                     xaxis_title='Vuelta')
     return polish(f, grid=True)
@@ -1445,12 +1445,12 @@ def chart_pace(data, selected, color_map):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     pdf = pace_df(ses)
     if selected: pdf = pdf[pdf['Driver'].isin(selected)]
-    if pdf.empty: return fig_empty("Ritmo â€” sin datos de vueltas")
+    if pdf.empty: return fig_empty("Ritmo — sin datos de vueltas")
     f = go.Figure()
     for drv, d in pdf.groupby('Driver'):
         f.add_trace(go.Scatter(x=d['LapNumber'], y=d['LapSeconds'], mode='lines+markers', line=dict(width=1.6), marker=dict(size=5),
                                name=str(drv),
-                               hovertemplate=f"{drv} â€” Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
+                               hovertemplate=f"{drv} — Vuelta %{{x}}<br>%{{y:.3f}}s<extra></extra>"))
     f.update_yaxes(title="s", tickformat=".3f")
     f.update_layout(title="Ritmo vuelta a vuelta")
     return set_trace_color(polish(f), color_map)
@@ -1466,7 +1466,7 @@ def chart_best(data, selected, color_map):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     laps = ses.laps.dropna(subset=['LapTime'])
     if selected: laps = laps[laps['Driver'].isin(selected)]
-    if laps.empty: return fig_empty("Mejores vueltas â€” sin datos")
+    if laps.empty: return fig_empty("Mejores vueltas — sin datos")
     best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
     best['Best_s'] = best['LapTime'].dt.total_seconds()
     best['BestStr'] = best['Best_s'].apply(s_to_mssmmm)
@@ -1484,7 +1484,7 @@ def chart_sectors(data, selected):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     df = sector_records_df(ses)
     if selected and not df.empty: df = df[df['Driver'].isin(selected)]
-    if df.empty: return fig_empty("RÃ©cords por sector â€” sin datos")
+    if df.empty: return fig_empty("Récords por sector — sin datos")
     f = go.Figure(data=[go.Table(
         header=dict(values=['Sector', 'Piloto', 'Tiempo (s)'],
                     fill_color='#1d1d28', line_color='rgba(255,255,255,0.12)',
@@ -1493,7 +1493,7 @@ def chart_sectors(data, selected):
                    fill_color='rgba(255,255,255,0.02)', line_color='rgba(255,255,255,0.08)',
                    align='left', height=28, font=dict(color='#f4f4f8'))
     )])
-    f.update_layout(title="RÃ©cords por sector", paper_bgcolor=COL_PANEL)
+    f.update_layout(title="Récords por sector", paper_bgcolor=COL_PANEL)
     return brand(f)
 
 # ---------- Speeds ----------
@@ -1506,7 +1506,7 @@ def chart_speeds(data, selected):
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     spd = speed_records_df(ses)
     if selected and not spd.empty: spd = spd[spd['Driver'].isin(selected)]
-    if spd.empty: return fig_empty("Velocidades â€” sin datos")
+    if spd.empty: return fig_empty("Velocidades — sin datos")
     if spd.shape[1] > 2:
         dm = spd.melt(id_vars='Driver', var_name='Metric', value_name='km/h')
         f = px.bar(dm, x='Driver', y='km/h', color='Metric', barmode='group', title='Velocidades')
@@ -1523,12 +1523,26 @@ def _telemetry_figures(data, selected, color_map):
     selected = (selected or [])[:4]
     if not selected:
         return [empty] * 9
+    year = int(data.get('year', 2025))
+    event = data['event']
+    sess = str(data.get('sess', 'Q')).upper()
+    # Race telemetry is much heavier and can freeze the UI while FastF1 downloads
+    # a full grand prix. For comparison views, qualifying is the useful baseline.
+    preferred = 'Q' if sess == 'R' else ('SQ' if sess == 'SR' else sess)
     try:
-        ses = load_session_telemetry(int(data.get('year', 2025)), data['event'], data['sess'])
+        ses = load_session_telemetry(year, event, preferred)
     except Exception:
-        traceback.print_exc()
-        err = fig_empty("No se pudo cargar la telemetria")
-        return [err] * 9
+        if preferred != sess:
+            try:
+                ses = load_session_telemetry(year, event, sess)
+            except Exception:
+                traceback.print_exc()
+                err = fig_empty("No se pudo cargar la telemetria")
+                return [err] * 9
+        else:
+            traceback.print_exc()
+            err = fig_empty("No se pudo cargar la telemetria")
+            return [err] * 9
     color_map = color_map or {}
     return [
         _fig_tel_speed(ses, selected, color_map),
@@ -1717,14 +1731,14 @@ def render_results(data, tab):
         results_tbl = build_results_table(ses, data['sess'])
     except Exception:
         traceback.print_exc()
-        results_tbl = html.Div("No se pudo cargar el resultado de esta sesiÃ³n.", className="rlo-note")
+        results_tbl = html.Div("No se pudo cargar el resultado de esta sesión.", className="rlo-note")
     try:
         drv_rows, team_rows = season_standings(year, _utc_today_token())
         drivers_tbl = build_standings_drivers(drv_rows)
         teams_tbl = build_standings_teams(team_rows)
     except Exception:
         traceback.print_exc()
-        drivers_tbl = teams_tbl = html.Div("ClasificaciÃ³n no disponible ahora mismo.", className="rlo-note")
+        drivers_tbl = teams_tbl = html.Div("Clasificación no disponible ahora mismo.", className="rlo-note")
     return results_tbl, drivers_tbl, teams_tbl
 
 # ---------- Home & Live content ----------
@@ -1753,23 +1767,23 @@ def render_home(year, tab):
         loc = nx['location'] or nx['country']
         next_div = html.Div([
             html.Div(nx['event'], className="rlo-next-event"),
-            html.Div(nx['session'] + (f" Â· {loc}" if loc else ""), className="rlo-next-sub"),
-            html.Div("â€”:â€”:â€”", id="home-cd", className="rlo-cd"),
-            html.Div(nx['utc'].strftime('%d/%m/%Y Â· %H:%M UTC'), className="rlo-next-when"),
+            html.Div(nx['session'] + (f" · {loc}" if loc else ""), className="rlo-next-sub"),
+            html.Div("—:—:—", id="home-cd", className="rlo-cd"),
+            html.Div(nx['utc'].strftime('%d/%m/%Y · %H:%M UTC'), className="rlo-next-when"),
         ])
     else:
-        next_div = html.Div("Sin sesiones prÃ³ximas en el calendario.", className="rlo-note")
+        next_div = html.Div("Sin sesiones próximas en el calendario.", className="rlo-note")
 
     pod = last_race_podium(year, token)
     if pod:
         name, podium = pod
-        medals = ['ðŸ¥‡', 'ðŸ¥ˆ', 'ðŸ¥‰']
+        medals = ['1.', '2.', '3.']
         podium_div = html.Div(
             [html.Div(name, className="rlo-next-sub", style={"marginBottom": "8px"})] +
             [_leader_row(medals[i] if i < 3 else str(i + 1), full or ab, ab, '', _team_color(team))
              for i, (pos, ab, full, team) in enumerate(podium)])
     else:
-        podium_div = html.Div("Sin resultados de carrera todavÃ­a.", className="rlo-note")
+        podium_div = html.Div("Sin resultados de carrera todavía.", className="rlo-note")
 
     try:
         drv_rows, team_rows = season_standings(year, token)
@@ -1777,19 +1791,19 @@ def render_home(year, tab):
         drv_rows, team_rows = [], []
     drv_div = (html.Div([_leader_row(i + 1, name, ab, _fmt_pts(pts), _team_color(team))
                          for i, (ab, name, team, pts) in enumerate(drv_rows[:5])])
-               if drv_rows else html.Div("AÃºn sin puntos esta temporada.", className="rlo-note"))
+               if drv_rows else html.Div("Aún sin puntos esta temporada.", className="rlo-note"))
     team_div = (html.Div([_leader_row(i + 1, tm, '', _fmt_pts(pts), _team_color(tm))
                           for i, (tm, pts) in enumerate(team_rows[:5])])
-                if team_rows else html.Div("AÃºn sin puntos esta temporada.", className="rlo-note"))
+                if team_rows else html.Div("Aún sin puntos esta temporada.", className="rlo-note"))
 
     return next_div, target_ms, podium_div, drv_div, team_div
 
 app.clientside_callback(
     """
     function(n, target) {
-        if (!target) { return 'â€”:â€”:â€”'; }
+        if (!target) { return '—:—:—'; }
         var diff = Math.floor((target - Date.now())/1000);
-        if (diff <= 0) { return 'Â¡EN PISTA!'; }
+        if (diff <= 0) { return '¡EN PISTA!'; }
         var d = Math.floor(diff/86400); diff -= d*86400;
         var h = Math.floor(diff/3600); diff -= h*3600;
         var m = Math.floor(diff/60); var s = diff - m*60;
@@ -1818,16 +1832,16 @@ def render_live(year, tab):
     live = live_session_info(year, token)
     if live:
         return html.Div(className="rlo-live-banner live", children=[
-            html.Span("â— EN VIVO", className="rlo-live-dot"),
-            html.Span(f"{live['session']} â€” {live['event']}"),
+            html.Span("● EN VIVO", className="rlo-live-dot"),
+            html.Span(f"{live['session']} — {live['event']}"),
         ])
     nx = next_session_info(year, token)
     if nx:
         return html.Div(className="rlo-live-banner", children=[
-            html.Span("â—‹ Sin sesiÃ³n ahora", className="rlo-live-dot off"),
-            html.Span(f"PrÃ³xima: {nx['session']} â€” {nx['event']} Â· {nx['utc'].strftime('%d/%m %H:%M UTC')}"),
+            html.Span("○ Sin sesión ahora", className="rlo-live-dot off"),
+            html.Span(f"Próxima: {nx['session']} — {nx['event']} · {nx['utc'].strftime('%d/%m %H:%M UTC')}"),
         ])
-    return html.Div("Sin informaciÃ³n de sesiones.", className="rlo-note")
+    return html.Div("Sin información de sesiones.", className="rlo-note")
 
 # ================= CSV download (pattern-matching) =================
 @app.callback(
@@ -1844,7 +1858,7 @@ def download_chart_csv(n_clicks, btn_id, store_data, selected_drivers):
 
     chart_key = btn_id.get("chart")
     try:
-        # Carga sesiÃ³n (laps-only) para exportar datos rÃ¡pidos
+        # Carga sesión (laps-only) para exportar datos rápidos
         ses = load_session_laps(
             int(store_data.get("year", 2025)),
             str(store_data["event"]),
@@ -1856,7 +1870,7 @@ def download_chart_csv(n_clicks, btn_id, store_data, selected_drivers):
         if df is None:
             return no_update
 
-        # Si estÃ¡ vacÃ­o, aÃºn asÃ­ devolvemos CSV con headers (mejor UX)
+        # Si está vacío, aún así devolvemos CSV con headers (mejor UX)
         safe_event = str(store_data["event"]).replace("|", "_").replace(" ", "_")
         safe_sess = str(store_data["sess"]).replace(" ", "_")
         fname = f"{chart_key}_{store_data.get('year', 0)}_{safe_event}_{safe_sess}.csv"
@@ -2044,7 +2058,7 @@ def api_session():
         ses = load_session_laps(year, event, sess)
     except Exception:
         traceback.print_exc()
-        return jsonify(error="No se pudo cargar la sesiÃ³n")
+        return jsonify(error="No se pudo cargar la sesión")
     try:
         laps = ses.laps.dropna(subset=['LapTime']).copy()
         laps['t'] = laps['LapTime'].dt.total_seconds()
@@ -2061,7 +2075,7 @@ def api_session():
                        isRace=is_race(ses))
     except Exception:
         traceback.print_exc()
-        return jsonify(error="Error procesando la sesiÃ³n")
+        return jsonify(error="Error procesando la sesión")
 
 @server.route("/api/standings")
 def api_standings():
