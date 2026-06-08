@@ -258,3 +258,26 @@ label, .rlo-filter label{
   .rlo-navbar{ padding:10px 14px; gap:10px; }
   .rlo-tab{ padding:8px 13px !important; font-size:11.5px; }
 }
+
+/* Quick driver presets + telemetry label toggles */
+.rlo-quick{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-bottom:8px;
+}
+.rlo-quick .btn,
+.box .btn{
+  border-radius:999px !important;
+  font-weight:800 !important;
+  letter-spacing:.02em;
+}
+.rlo-checks label{
+  margin-right:14px;
+  color:var(--rlo-muted);
+  font-weight:700;
+}
+.rlo-checks input{
+  margin-right:6px;
+  accent-color:var(--rlo-red);
+}

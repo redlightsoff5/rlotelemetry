@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 # Default template (rlo_dark) is registered below, once the palette is defined.
 
+import dash
 from dash import Dash, dcc, html, Input, Output, State, no_update, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -971,10 +972,20 @@ def graph_box(graph_id: str, title: str, chart_key: str):
                 md=6
             ),
             dbc.Col([
+                html.Div([
+                    dbc.Button("Top4", id={"role": "quick", "chart": chart_key, "preset": "top4"},
+                               n_clicks=0, size="sm", outline=True, color="secondary"),
+                    dbc.Button("Top10", id={"role": "quick", "chart": chart_key, "preset": "top10"},
+                               n_clicks=0, size="sm", outline=True, color="secondary"),
+                    dbc.Button("Todos", id={"role": "quick", "chart": chart_key, "preset": "all"},
+                               n_clicks=0, size="sm", outline=True, color="secondary"),
+                    dbc.Button("Limpiar", id={"role": "quick", "chart": chart_key, "preset": "clear"},
+                               n_clicks=0, size="sm", outline=True, color="secondary"),
+                ], className="rlo-quick"),
                 dcc.Dropdown(
                     id={"role": "drv", "chart": chart_key},
                     multi=True,
-                    placeholder="Filtrar pilotos (opcional)",
+                    placeholder="Filtrar pilotos",
                     options=[],
                     value=[]
                 )
@@ -1147,7 +1158,7 @@ def tab_telemetry():
     return html.Div([
         html.Div(
             "Telemetría de la vuelta rápida. Elige 1-4 pilotos. "
-            "Si el selector está en Carrera, usamos Clasificación para comparar vueltas rápidas y evitar cargas enormes.",
+            "La telemetría respeta la sesión seleccionada: Carrera usa la vuelta rápida de carrera y Clasificación usa la vuelta rápida de clasificación.",
             className="rlo-note"),
         html.Div(className="box", children=[
             dbc.Row([
@@ -1355,8 +1366,13 @@ def load_session_meta(year, event_value, sess_code):
         return None, [], {}
     try:
         ses = load_session_laps(int(year), str(event_value), str(sess_code))
-        laps = ses.laps.dropna(subset=['LapTime'])
-        drivers = sorted(laps['Driver'].dropna().unique().tolist())
+        laps = ses.laps.dropna(subset=['LapTime']).copy()
+        if not laps.empty:
+            best = laps.loc[laps.groupby('Driver')['LapTime'].idxmin()].copy()
+            best['_s'] = best['LapTime'].dt.total_seconds()
+            drivers = best.sort_values('_s')['Driver'].dropna().astype(str).tolist()
+        else:
+            drivers = []
         colors = driver_team_color_map(ses)
         return {'year': int(year), 'event': str(event_value), 'sess': str(sess_code)}, drivers, colors
     except Exception:
@@ -1378,7 +1394,7 @@ def fill_dropdowns(drivers, _children, ids):
     for _id in ids:
         out_opts.append(opts)
         # Telemetry is heavy: start empty so nothing downloads until the user picks.
-        out_val.append(drivers)
+        out_val.append(drivers[:10])
     return out_opts, out_val
 
 @app.callback(
@@ -1388,6 +1404,36 @@ def fill_dropdowns(drivers, _children, ids):
 )
 def fill_tel_drivers(drivers, _children):
     return [{'label': d, 'value': d} for d in (drivers or [])]
+
+
+@app.callback(
+    Output({'role':'drv','chart':MATCH}, 'value', allow_duplicate=True),
+    Input({'role':'quick','chart':MATCH,'preset':ALL}, 'n_clicks'),
+    State({'role':'quick','chart':MATCH,'preset':ALL}, 'id'),
+    State('drivers-store', 'data'),
+    prevent_initial_call=True,
+)
+def quick_driver_select(clicks, ids, drivers):
+    if not clicks or not any(clicks):
+        raise PreventUpdate
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+    trig = ctx.triggered[0]['prop_id'].split('.')[0]
+    try:
+        preset = json.loads(trig).get('preset')
+    except Exception:
+        raise PreventUpdate
+    drivers = drivers or []
+    if preset == 'top4':
+        return drivers[:4]
+    if preset == 'top10':
+        return drivers[:10]
+    if preset == 'all':
+        return drivers
+    if preset == 'clear':
+        return []
+    raise PreventUpdate
 
 # ===== Year-driven GP list + guard against future-only seasons =====
 @app.callback(
@@ -1592,16 +1638,42 @@ def chart_speeds(data, selected):
     if not data: return fig_empty("(no data)")
     ses = load_session_laps(int(data.get('year', 2025)), data['event'], data['sess'])
     spd = speed_records_df(ses)
-    if selected and not spd.empty: spd = spd[spd['Driver'].isin(selected)]
-    if spd.empty: return fig_empty("Velocidades — sin datos")
-    if spd.shape[1] > 2:
-        dm = spd.melt(id_vars='Driver', var_name='Metric', value_name='km/h')
-        f = px.bar(dm, x='Driver', y='km/h', color='Metric', barmode='group', title='Velocidades')
-    else:
-        ycol = spd.columns[-1]
-        f = px.bar(spd, x='Driver', y=ycol, title='Velocidades')
-    f.update_traces(marker_line_width=0)
-    f.update_layout(yaxis_title="km/h")
+    if selected and not spd.empty:
+        spd = spd[spd['Driver'].isin(selected)]
+    if spd.empty:
+        return fig_empty("Velocidades — sin datos")
+    metrics = [c for c in ['Trap (km/h)', 'I1 (km/h)', 'I2 (km/h)', 'Finish (km/h)'] if c in spd.columns]
+    if not metrics:
+        metrics = [c for c in spd.columns if c != 'Driver']
+    if not metrics:
+        return fig_empty("Velocidades — sin datos")
+    spd = spd.copy()
+    spd['_max'] = spd[metrics].max(axis=1, skipna=True)
+    spd = spd.sort_values('_max', ascending=True)
+    palette = {
+        'Trap (km/h)': '#ff2d20',
+        'I1 (km/h)': '#27F4D2',
+        'I2 (km/h)': '#64C4FF',
+        'Finish (km/h)': '#FF8000',
+    }
+    f = go.Figure()
+    for m in metrics:
+        f.add_trace(go.Scatter(
+            x=spd[m], y=spd['Driver'], mode='markers', name=m.replace(' (km/h)', ''),
+            marker=dict(size=11, color=palette.get(m, '#f4f4f8'), line=dict(width=1, color='rgba(255,255,255,.35)')),
+            hovertemplate='%{y}<br>' + m + ': %{x:.1f} km/h<extra></extra>'
+        ))
+    # Light connector per driver: reveals each driver speed profile without bar clutter.
+    for _, r in spd.iterrows():
+        vals = [r[m] for m in metrics if pd.notna(r[m])]
+        if len(vals) >= 2:
+            f.add_trace(go.Scatter(x=[min(vals), max(vals)], y=[r['Driver'], r['Driver']], mode='lines',
+                                   line=dict(color='rgba(255,255,255,.14)', width=2), showlegend=False, hoverinfo='skip'))
+    f.update_layout(title='Perfil de velocidades',
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5),
+                    margin=dict(l=70, r=18, t=70, b=48))
+    f.update_xaxes(title='km/h', gridcolor='rgba(255,255,255,.08)')
+    f.update_yaxes(title='', autorange=True)
     return polish(f)
 
 # ---------- Telemetry ----------
@@ -1613,23 +1685,14 @@ def _telemetry_figures(data, selected, color_map, labels):
     year = int(data.get('year', 2025))
     event = data['event']
     sess = str(data.get('sess', 'Q')).upper()
-    # Race telemetry is much heavier and can freeze the UI while FastF1 downloads
-    # a full grand prix. For comparison views, qualifying is the useful baseline.
-    preferred = 'Q' if sess == 'R' else ('SQ' if sess == 'SR' else sess)
+    # Respect the selected session exactly: Carrera -> race fastest lap,
+    # Clasificacion -> qualifying fastest lap, etc.
     try:
-        ses = load_session_telemetry(year, event, preferred)
+        ses = load_session_telemetry(year, event, sess)
     except Exception:
-        if preferred != sess:
-            try:
-                ses = load_session_telemetry(year, event, sess)
-            except Exception:
-                traceback.print_exc()
-                err = fig_empty("No se pudo cargar la telemetria")
-                return [err] * 8
-        else:
-            traceback.print_exc()
-            err = fig_empty("No se pudo cargar la telemetria")
-            return [err] * 8
+        traceback.print_exc()
+        err = fig_empty("No se pudo cargar la telemetria de esta sesion")
+        return [err] * 8
     color_map = color_map or {}
     return [
         _fig_tel_speed(ses, selected, color_map, labels),
